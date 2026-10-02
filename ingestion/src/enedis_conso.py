@@ -74,15 +74,15 @@ def load_to_bronze(records: list[dict], annee: int) -> int:
 def main() -> None:
     """Point d'entrée CLI."""
     parser = argparse.ArgumentParser(description="Ingestion Enedis consommation par commune et secteur")
-    parser.add_argument("--annee", required=True, type=int, nargs="+", help="Une ou plusieurs années (2011-2024)")
+    parser.add_argument("--year", required=True, type=int, nargs="+", help="Une ou plusieurs années (2011-2024)")
     parser.add_argument("--region", default=REGION_CODE_PDL, help="Code INSEE région (52 = Pays de la Loire)")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
     load_dotenv()
 
-    for annee in args.annee:
-        load_to_bronze(fetch_records(annee, args.region), annee)
+    for year in args.year:
+        load_to_bronze(fetch_records(year, args.region), year)
 
 
 if __name__ == "__main__":

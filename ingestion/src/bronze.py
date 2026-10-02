@@ -5,6 +5,7 @@ dans `payload`, avec `source_dataset`, `extracted_for` et `ingested_at`. Le typa
 dédoublonnage sont faits en staging dbt.
 """
 
+import argparse
 import json
 import logging
 import os
@@ -18,8 +19,42 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 logger = logging.getLogger(__name__)
 
 BRONZE_SCHEMA = "bronze"
-INSERT_BATCH_SIZE = 50
+INSERT_BATCH_SIZE = 500
 REQUEST_TIMEOUT_S = 60
+
+
+def year_month(value: str) -> str:
+    """Valide une période `YYYY-MM` (type argparse pour `--start-date` / `--end-date`).
+
+    Args:
+        value: Chaîne saisie en ligne de commande.
+
+    Returns:
+        La même chaîne, si elle est valide.
+
+    Raises:
+        argparse.ArgumentTypeError: si le format n'est pas `YYYY-MM`.
+    """
+    try:
+        datetime.strptime(value, "%Y-%m")
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"période invalide '{value}' (attendu : YYYY-MM)") from None
+    return value
+
+
+def period_label(start_date: str | None, end_date: str | None) -> str:
+    """Libellé de la fenêtre demandée, stocké dans `extracted_for`.
+
+    Args:
+        start_date: Première période (YYYY-MM) ou None.
+        end_date: Dernière période (YYYY-MM) ou None.
+
+    Returns:
+        "full" sans borne, sinon "début/fin" (une borne absente reste vide).
+    """
+    if not start_date and not end_date:
+        return "full"
+    return f"{start_date or ''}/{end_date or ''}"
 
 
 def is_retryable(exc: BaseException) -> bool:

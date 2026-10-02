@@ -1,20 +1,10 @@
-"""Tests de bdf_pmi.py.
-
-Les fixtures reproduisent le format SDMX-JSON *supposé* de Webstat : il n'a pas été vérifié
-contre l'API réelle (clé indisponible). Ces tests valident la logique du script, pas le contrat
-de l'API : à confirmer avec un premier appel réel.
-"""
-
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 import bdf_pmi
 
-SDMX_JSON = {
-    "structure": {"dimensions": {"observation": [{"id": "TIME_PERIOD", "values": [{"id": "2026-05"}, {"id": "2026-06"}]}]}},
-    "dataSets": [{"series": {"0:0:0": {"observations": {"0": [101.5, 0], "1": [99.0, 0]}}}}],
-}
+SERIES = ("CONJ2.M.R52.S.IN.000CZ.ICAIN000.10", "CONJ2.M.R52.S.IN.000CZ.PRTEM100.10")
 
 
 def test_build_headers_requires_api_key(monkeypatch):
@@ -23,46 +13,42 @@ def test_build_headers_requires_api_key(monkeypatch):
         bdf_pmi.build_headers()
 
 
-def test_build_headers_sends_client_id(monkeypatch):
+def test_build_headers_uses_apikey_authorization(monkeypatch):
     monkeypatch.setenv("BDF_API_KEY", "secret")
-    assert bdf_pmi.build_headers()["X-IBM-Client-Id"] == "secret"
+    assert bdf_pmi.build_headers() == {"Authorization": "Apikey secret"}
 
 
-def test_parse_observations_flattens_one_row_per_period():
-    records = bdf_pmi.parse_observations(SDMX_JSON, "CONJ2.M.R52.S.IN.000CZ.ICAIN000.10", "Climat des affaires")
-
-    assert records == [
-        {"series_key": "CONJ2.M.R52.S.IN.000CZ.ICAIN000.10", "title_fr": "Climat des affaires", "time_period": "2026-05", "obs_value": 101.5},
-        {"series_key": "CONJ2.M.R52.S.IN.000CZ.ICAIN000.10", "title_fr": "Climat des affaires", "time_period": "2026-06", "obs_value": 99.0},
-    ]
+def test_build_where_clause_filters_series_only_without_bounds():
+    assert bdf_pmi.build_where_clause(SERIES, None, None) == (
+        'series_key IN ("CONJ2.M.R52.S.IN.000CZ.ICAIN000.10", "CONJ2.M.R52.S.IN.000CZ.PRTEM100.10")'
+    )
 
 
-def test_parse_observations_keeps_staging_contract_keys():
-    expected = {"series_key", "title_fr", "time_period", "obs_value"}
-    assert all(set(r) == expected for r in bdf_pmi.parse_observations(SDMX_JSON, "K", "T"))
+def test_build_where_clause_adds_inclusive_period_bounds():
+    where = bdf_pmi.build_where_clause(SERIES, "2018-01", "2024-12")
+    assert where.endswith("and time_period_start >= date'2018-01-01' and time_period_start <= date'2024-12-01'")
 
 
-@pytest.mark.parametrize("payload", [{}, {"dataSets": []}, {"error": "unauthorized"}, None])
-def test_parse_observations_fails_loudly_on_unexpected_structure(payload):
-    with pytest.raises(ValueError, match="inattendue"):
-        bdf_pmi.parse_observations(payload, "K", "T")
+def test_build_where_clause_accepts_a_single_bound():
+    assert "date'2020-03-01'" in bdf_pmi.build_where_clause(SERIES, "2020-03", None)
+    assert "time_period_start <=" not in bdf_pmi.build_where_clause(SERIES, "2020-03", None)
 
 
-def test_fetch_records_requests_each_series_with_auth(monkeypatch):
+def test_fetch_records_calls_export_with_auth_and_selected_fields(monkeypatch):
     monkeypatch.setenv("BDF_API_KEY", "secret")
+    rows = [{"series_key": SERIES[0], "title_fr": "T", "time_period": "2024-01", "obs_value": 98.5, "obs_status": "A"}]
     response = MagicMock()
-    response.json.return_value = SDMX_JSON
-    series = {"CONJ2.M.R52.S.IN.000CZ.ICAIN000.10": "A", "CONJ2.M.R52.S.IN.000CZ.PRTEM100.10": "B"}
+    response.json.return_value = rows
 
     with patch.object(bdf_pmi, "get_with_retry", return_value=response) as mock_get:
-        records = bdf_pmi.fetch_records(series, start_period="2026-01")
+        records = bdf_pmi.fetch_records(SERIES, "2018-01", "2024-12")
 
-    assert len(records) == 4
-    assert mock_get.call_count == 2
-    first = mock_get.call_args_list[0]
-    assert first.args[0].endswith("/data/CONJ2/M.R52.S.IN.000CZ.ICAIN000.10")
-    assert first.kwargs["headers"]["X-IBM-Client-Id"] == "secret"
-    assert first.kwargs["params"] == {"format": "json", "startPeriod": "2026-01"}
+    assert records == rows
+    assert mock_get.call_args.args[0] == bdf_pmi.BDF_EXPORT_URL
+    assert mock_get.call_args.kwargs["headers"] == {"Authorization": "Apikey secret"}
+    params = mock_get.call_args.kwargs["params"]
+    assert params["select"] == "series_key,title_fr,time_period,obs_value,obs_status"
+    assert "date'2018-01-01'" in params["where"]
 
 
 def test_fetch_records_fails_before_any_call_without_api_key(monkeypatch):
@@ -73,12 +59,19 @@ def test_fetch_records_fails_before_any_call_without_api_key(monkeypatch):
     mock_get.assert_not_called()
 
 
-def test_default_series_keys_follow_catalog_naming():
-    assert all(key.startswith("CONJ2.M.R52.") for key in bdf_pmi.DEFAULT_SERIES)
+def test_default_series_keys_are_pdl_conjoncture():
+    assert all(key.startswith("CONJ2.M.R52.") for key in bdf_pmi.DEFAULT_SERIES_KEYS)
 
 
-@pytest.mark.parametrize(("start", "expected"), [(None, "full"), ("2024-01", "2024-01")])
-def test_load_to_bronze_traces_start_period(start, expected):
+def test_selected_fields_cover_staging_contract():
+    assert {"series_key", "title_fr", "time_period", "obs_value"} <= set(bdf_pmi.SELECTED_FIELDS.split(","))
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "expected"),
+    [(None, None, "full"), ("2020-01", "2024-12", "2020-01/2024-12"), (None, "2024-12", "/2024-12")],
+)
+def test_load_to_bronze_traces_requested_window(start, end, expected):
     with patch.object(bdf_pmi, "append_to_bronze", return_value=1) as mock_append:
-        bdf_pmi.load_to_bronze([{"a": 1}], start)
+        bdf_pmi.load_to_bronze([{"a": 1}], start, end)
     mock_append.assert_called_once_with("raw_bdf_pmi", [{"a": 1}], "CONJ2", expected)

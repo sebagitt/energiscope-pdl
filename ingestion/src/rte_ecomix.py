@@ -20,6 +20,8 @@ from databricks.sql.client import Connection
 from dotenv import load_dotenv
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
+from bronze import append_to_bronze, year_month
+
 logger = logging.getLogger(__name__)
 
 ODRE_BASE_URL = "https://odre.opendatasoft.com/api/explore/v2.1/catalog/datasets"
@@ -189,10 +191,94 @@ def load_to_bronze(records: list[dict], dataset: str, day: date) -> int:
     return len(records)
 
 
+def month_windows(start_month: str, end_month: str) -> list[tuple[str, date, date]]:
+    """Découpe une plage de mois (bornes incluses) en fenêtres mensuelles UTC.
+
+    Args:
+        start_month: Premier mois (YYYY-MM).
+        end_month: Dernier mois (YYYY-MM).
+
+    Returns:
+        Liste de (libellé YYYY-MM, premier jour du mois, premier jour du mois suivant).
+    """
+    year, month = map(int, start_month.split("-"))
+    last = tuple(map(int, end_month.split("-")))
+    windows = []
+    while (year, month) <= last:
+        next_year, next_month = (year + 1, 1) if month == 12 else (year, month + 1)
+        windows.append((f"{year:04d}-{month:02d}", date(year, month, 1), date(next_year, next_month, 1)))
+        year, month = next_year, next_month
+    return windows
+
+
+def build_range_where(start: date, end: date, region_code: str = REGION_CODE_PDL) -> str:
+    """Construit le filtre ODSQL sur une plage de créneaux UTC `[start, end[`.
+
+    Le champ texte `date` n'accepte pas les comparaisons d'ordre : on filtre sur `date_heure`.
+
+    Args:
+        start: Premier jour inclus (UTC).
+        end: Premier jour exclu (UTC).
+        region_code: Code INSEE de la région.
+
+    Returns:
+        Clause `where` ODSQL.
+    """
+    return (
+        f"code_insee_region = '{region_code}' "
+        f"and date_heure >= date'{start.isoformat()}' and date_heure < date'{end.isoformat()}'"
+    )
+
+
+def fetch_window(start: date, end: date, dataset: str = DATASETS["cons-def"]) -> list[dict]:
+    """Récupère les enregistrements d'une fenêtre de dates pour les Pays de la Loire.
+
+    Args:
+        start: Premier jour inclus (UTC).
+        end: Premier jour exclu (UTC).
+        dataset: Identifiant du jeu ODRE.
+
+    Returns:
+        Liste des enregistrements JSON bruts.
+    """
+    headers = {}
+    api_key = os.getenv("RTE_API_KEY")
+    if api_key:
+        headers["Authorization"] = f"Apikey {api_key}"
+    return _get_json(
+        f"{ODRE_BASE_URL}/{dataset}/exports/json",
+        params={"where": build_range_where(start, end)},
+        headers=headers,
+    )
+
+
+def backfill(start_month: str, end_month: str, dataset: str) -> int:
+    """Charge en Bronze une plage de mois, un mois à la fois (reprise possible via `--start-date`).
+
+    Args:
+        start_month: Premier mois (YYYY-MM).
+        end_month: Dernier mois (YYYY-MM).
+        dataset: Identifiant du jeu ODRE.
+
+    Returns:
+        Nombre total de lignes chargées.
+    """
+    windows = month_windows(start_month, end_month)
+    total = 0
+    for index, (label, start, end) in enumerate(windows, start=1):
+        records = fetch_window(start, end, dataset)
+        total += append_to_bronze(BRONZE_TABLE, records, dataset, label)
+        logger.info("[%d/%d] %s : %d lignes (cumul %d)", index, len(windows), label, len(records), total)
+    return total
+
+
 def main() -> None:
     """Point d'entrée CLI."""
     parser = argparse.ArgumentParser(description="Ingestion RTE eco2mix régional (PDL)")
-    parser.add_argument("--date", required=True, type=date.fromisoformat, help="Jour à ingérer (YYYY-MM-DD)")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--date", type=date.fromisoformat, help="Un seul jour (YYYY-MM-DD, heure locale)")
+    mode.add_argument("--start-date", type=year_month, help="Backfill à partir de ce mois (YYYY-MM)")
+    parser.add_argument("--end-date", type=year_month, help="Dernier mois du backfill (YYYY-MM), mois courant par défaut")
     parser.add_argument(
         "--dataset",
         choices=DATASETS,
@@ -200,13 +286,21 @@ def main() -> None:
         help="tr = temps réel (~3 derniers mois), cons-def = historique consolidé/définitif",
     )
     args = parser.parse_args()
+    if args.end_date and not args.start_date:
+        parser.error("--end-date nécessite --start-date")
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
     load_dotenv()
 
     dataset = DATASETS[args.dataset]
-    records = fetch_records(args.date, dataset)
-    load_to_bronze(records, dataset, args.date)
+    if args.start_date:
+        end_month = args.end_date or date.today().strftime("%Y-%m")
+        if end_month < args.start_date:
+            parser.error("--end-date doit être postérieure à --start-date")
+        backfill(args.start_date, end_month, dataset)
+    else:
+        records = fetch_records(args.date, dataset)
+        load_to_bronze(records, dataset, args.date)
 
 
 if __name__ == "__main__":

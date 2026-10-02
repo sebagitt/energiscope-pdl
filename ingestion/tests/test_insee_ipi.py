@@ -46,11 +46,11 @@ def test_parse_series_xml_returns_empty_list_without_series():
 def test_fetch_records_joins_idbanks_and_passes_start_period():
     response = MagicMock(content=SDMX_XML)
     with patch.object(insee_ipi, "get_with_retry", return_value=response) as mock_get:
-        records = insee_ipi.fetch_records(["111", "222"], start_period="2026-01")
+        records = insee_ipi.fetch_records(["111", "222"], start_date="2026-01", end_date="2026-06")
 
     assert len(records) == 3
     assert mock_get.call_args.args[0].endswith("/SERIES_BDM/111+222")
-    assert mock_get.call_args.kwargs["params"] == {"startPeriod": "2026-01"}
+    assert mock_get.call_args.kwargs["params"] == {"startPeriod": "2026-01", "endPeriod": "2026-06"}
 
 
 def test_fetch_records_omits_params_for_full_history():
@@ -63,8 +63,24 @@ def test_default_series_are_monthly_idbanks():
     assert all(idbank.isdigit() and len(idbank) == 9 for idbank in insee_ipi.DEFAULT_IDBANKS)
 
 
-@pytest.mark.parametrize(("start", "expected"), [(None, "full"), ("2024-01", "2024-01")])
-def test_load_to_bronze_traces_start_period(start, expected):
+@pytest.mark.parametrize(
+    ("start", "end", "expected"),
+    [
+        (None, None, None),
+        ("2020-01", None, {"startPeriod": "2020-01"}),
+        (None, "2024-12", {"endPeriod": "2024-12"}),
+        ("2020-01", "2024-12", {"startPeriod": "2020-01", "endPeriod": "2024-12"}),
+    ],
+)
+def test_build_params(start, end, expected):
+    assert insee_ipi.build_params(start, end) == expected
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "expected"),
+    [(None, None, "full"), ("2020-01", "2024-12", "2020-01/2024-12"), ("2020-01", None, "2020-01/")],
+)
+def test_load_to_bronze_traces_requested_window(start, end, expected):
     with patch.object(insee_ipi, "append_to_bronze", return_value=1) as mock_append:
-        insee_ipi.load_to_bronze([{"a": 1}], start)
+        insee_ipi.load_to_bronze([{"a": 1}], start, end)
     mock_append.assert_called_once_with("raw_insee_ipi", [{"a": 1}], "SERIES_BDM", expected)

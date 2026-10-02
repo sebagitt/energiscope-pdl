@@ -85,6 +85,8 @@ energiscope-pdl/
 │   ├── tests/
 │   ├── macros/
 │   └── docs/
+├── scripts/
+│   └── activate_env.ps1         ← active le bon venv + charge .env (PowerShell)
 ├── powerbi/
 │   └── energiscope.pbix
 └── docs/
@@ -101,8 +103,21 @@ Deux venvs séparés, ignorés par git (`.venv/` dans `.gitignore`). Ne jamais l
 | Ingestion : scripts `src/*.py` et `pytest`         | `ingestion/.venv`| `ingestion/`       | requests, tenacity, python-dotenv, databricks-sql-connector, pytest  |
 | Airflow                                            | aucun (Docker)   | `airflow/`         | image officielle via `docker compose`                                |
 
+**Méthode recommandée (PowerShell) : `scripts/activate_env.ps1`.** Il active le bon venv, charge le `.env` et affiche un résumé (venv, Python, packages clés, variables du `.env` définies ou vides, sans jamais afficher leurs valeurs).
+
+```powershell
+. .\scripts\activate_env.ps1 ingestion   # ingestion\.venv : scripts Python, pytest
+. .\scripts\activate_env.ps1 dbt         # .venv racine : dbt
+```
+
+- Le point initial (dot-sourcing) est obligatoire : sans lui, le venv et les variables disparaissent à la fin du script.
+- On peut passer de l'un à l'autre directement : le venv précédent est désactivé automatiquement.
+- Les variables du `.env` écrasent celles déjà définies dans la session. Les lignes vides ou commentées sont ignorées.
+- Une variable marquée `VIDE` est présente dans le `.env` mais sans valeur (ex. `RTE_API_KEY`, optionnelle).
+- Venv introuvable : le script le signale avec la commande de création. Argument autre que `ingestion` ou `dbt` : refusé.
+
 ```bash
-# Activation (Windows)
+# Activation manuelle (Windows), si on n'utilise pas le script
 source .venv/Scripts/activate              # Git Bash : venv racine (dbt)
 source ingestion/.venv/Scripts/activate    # Git Bash : venv ingestion
 .\.venv\Scripts\Activate.ps1               # PowerShell : venv racine (dbt)
@@ -164,9 +179,9 @@ AIRFLOW_FERNET_KEY=      # généré avec: python -c "from cryptography.fernet i
 | RTE eco2mix historique | https://odre.opendatasoft.com/api/explore/v2.1/catalog/datasets/eco2mix-regional-cons-def/exports/json | REST JSON | 30min (depuis 2013) |
 | Enedis conso communes | https://opendata.enedis.fr/data-fair/api/v1/datasets/j75xc8cglfk5cp800y9uwqx9/lines | REST JSON (data-fair, pagination `next`) | Annuel (année × commune × grand secteur × NAF2), 2011-2024 |
 | INSEE IPI | https://api.insee.fr/series/BDM/V1/data/SERIES_BDM/ | SDMX XML, sans authentification | Mensuel (IPI France entière, pas de série régionale) |
-| Banque de France conjoncture PDL | https://api.webstat.banque-france.fr/webstat-fr/v1/data/CONJ2/ (séries `conj2-m-r52-*`) | JSON, clé `BDF_API_KEY` obligatoire | Mensuel |
+| Banque de France conjoncture PDL | https://webstat.banque-france.fr/api/explore/v2.1/catalog/datasets/observations/exports/json (séries `CONJ2.M.R52.*`) | JSON, `Authorization: Apikey <BDF_API_KEY>` | Mensuel |
 
-Webstat n'expose pas de valeurs via son API publique (`explore/v2.1`) : seul le catalogue des séries y est lisible. Les observations passent par l'API authentifiée.
+Webstat est une instance Opendatasoft : les datasets `conj2-*` du catalogue public sont des fiches de séries sans valeurs. Les observations sont dans le dataset restreint `observations`, visible uniquement avec une clé (56 caractères). L'ancienne API `api.webstat.banque-france.fr` (en-tête `X-IBM-Client-Id`) refuse cette clé.
 
 ## Décisions architecturales
 
@@ -221,11 +236,12 @@ docker compose logs -f airflow-scheduler # logs scheduler
 # Python ingestion (venv ingestion/.venv)
 cd ingestion/
 pip install -r requirements.txt
-python src/enedis_conso.py --annee 2023 2024                    # une ou plusieurs années (2011-2024)
-python src/insee_ipi.py --start-period 2020-01                  # séries IPI mensuelles
-python src/bdf_pmi.py --start-period 2020-01                    # nécessite BDF_API_KEY
+python src/enedis_conso.py --year 2023 2024                                  # une ou plusieurs années (2011-2024)
+python src/insee_ipi.py --start-date 2020-01 --end-date 2024-12              # séries IPI mensuelles (bornes optionnelles)
+python src/bdf_pmi.py --start-date 2020-01 --end-date 2024-12                # nécessite BDF_API_KEY
 python src/rte_ecomix.py --date 2026-09-30                      # temps réel (~3 derniers mois)
-python src/rte_ecomix.py --date 2024-01-01 --dataset cons-def  # backfill historique (depuis 2013)
+python src/rte_ecomix.py --dataset cons-def --start-date 2018-01              # backfill mensuel (1 requête + 1 chargement par mois), reprise possible en relançant depuis le mois en échec
+python src/rte_ecomix.py --date 2024-01-01 --dataset cons-def                # un seul jour de l'historique
 pytest tests/ -v                   # tests unitaires
 
 # GitHub Actions (déclenché sur push)

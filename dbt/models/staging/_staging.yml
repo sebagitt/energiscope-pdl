@@ -142,10 +142,20 @@ models:
   - name: stg_enedis_conso
     description: >
       Consommation électrique annuelle par commune et grand secteur d'activité (Enedis Open Data).
-      Grain : une ligne par année × commune × grand secteur.
+      Grain : une ligne par année × commune × grand secteur × secteur NAF2 × catégorie de consommation.
+      `code_secteur_naf2` est vide pour certains secteurs (ex. résidentiel).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - annee
+              - code_commune
+              - code_grand_secteur
+              - code_secteur_naf2
+              - code_categorie_consommation
     columns:
       - name: enedis_conso_id
-        description: Clé technique (hash de annee + code_commune + code_grand_secteur)
+        description: Clé technique (hash de annee + code_commune + code_grand_secteur + code_secteur_naf2 + code_categorie_consommation)
         data_tests: [not_null, unique]
       - name: annee
         description: Année de consommation
@@ -160,6 +170,17 @@ models:
       - name: code_grand_secteur
         description: Grand secteur d'activité Enedis (industrie, tertiaire, résidentiel, agriculture…)
         data_tests: [not_null]
+      - name: code_secteur_naf2
+        description: Code NAF niveau 2 (division) du secteur d'activité, vide pour certains secteurs
+      - name: code_categorie_consommation
+        description: Catégorie de consommation Enedis (ENT = entreprises, PRO = professionnels, RES = résidentiel)
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['ENT', 'PRO', 'RES']
+              config:
+                severity: warn
       - name: nb_sites
         description: Nombre de points de livraison
       - name: conso_totale_mwh

@@ -1,3 +1,4 @@
+import argparse
 import json
 from datetime import datetime
 from unittest.mock import MagicMock, patch
@@ -99,3 +100,22 @@ def test_append_to_bronze_creates_schema_and_table_first():
     assert statements[0].startswith("CREATE SCHEMA IF NOT EXISTS")
     assert statements[1].startswith("CREATE TABLE IF NOT EXISTS")
     assert statements[2].startswith("INSERT")
+
+
+@pytest.mark.parametrize("value", ["2020-01", "2024-12", "1999-06"])
+def test_year_month_accepts_valid_periods(value):
+    assert bronze.year_month(value) == value
+
+
+@pytest.mark.parametrize("value", ["2020", "2020-13", "2020-1-1", "01-2020", "abc", ""])
+def test_year_month_rejects_invalid_periods(value):
+    with pytest.raises(argparse.ArgumentTypeError, match="YYYY-MM"):
+        bronze.year_month(value)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "expected"),
+    [(None, None, "full"), ("2020-01", "2024-12", "2020-01/2024-12"), ("2020-01", None, "2020-01/"), (None, "2024-12", "/2024-12")],
+)
+def test_period_label(start, end, expected):
+    assert bronze.period_label(start, end) == expected
