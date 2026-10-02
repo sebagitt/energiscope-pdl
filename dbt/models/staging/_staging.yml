@@ -1,4 +1,223 @@
 version: 2
 
-models: []
-# TODO J6-J7 : stg_rte_ecomix, stg_enedis_conso, stg_insee_ipi, stg_bdf_pmi
+models:
+  - name: stg_rte_ecomix
+    description: >
+      Production et consommation électriques régionales Pays de la Loire (RTE eco2mix).
+      Grain : une ligne par région × créneau (15 min en temps réel, 30 min en consolidé).
+      Fusionne les jeux temps réel et consolidé/définitif en gardant la donnée la plus
+      consolidée. Les créneaux sans consommation (pré-publiés à l'avance) sont exclus.
+      Puissances en MW, taux en %.
+    columns:
+      - name: rte_ecomix_id
+        description: Clé technique (hash de code_insee_region + horodatage_utc)
+        data_tests: [not_null, unique]
+      - name: code_insee_region
+        description: Code INSEE de la région
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['52']
+      - name: libelle_region
+        description: Libellé de la région
+      - name: nature_donnees
+        description: Niveau de consolidation de la donnée RTE
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Données temps réel', 'Données consolidées', 'Données définitives']
+      - name: date_locale
+        description: Date en heure légale française
+        data_tests: [not_null]
+      - name: heure_locale
+        description: Heure de début du créneau en heure légale française (HH:MM)
+      - name: horodatage_utc
+        description: Début du créneau en UTC
+        data_tests: [not_null]
+      - name: consommation_mw
+        description: Consommation régionale
+        data_tests: [not_null]
+      - name: production_thermique_mw
+        description: Production thermique fossile
+      - name: production_nucleaire_mw
+        description: Production nucléaire
+      - name: production_eolien_mw
+        description: Production éolienne totale
+      - name: production_eolien_terrestre_mw
+        description: Production éolienne terrestre (jeu consolidé uniquement)
+      - name: production_eolien_offshore_mw
+        description: Production éolienne en mer (jeu consolidé uniquement)
+      - name: production_solaire_mw
+        description: Production solaire
+      - name: production_hydraulique_mw
+        description: Production hydraulique
+      - name: production_bioenergies_mw
+        description: Production bioénergies
+      - name: pompage_mw
+        description: Consommation des stations de pompage (valeur négative)
+      - name: stockage_batterie_mw
+        description: Charge des batteries (valeur négative)
+      - name: destockage_batterie_mw
+        description: Décharge des batteries
+      - name: echanges_physiques_mw
+        description: Solde des échanges physiques avec les régions voisines (positif = import)
+      - name: taux_couverture_thermique_pct
+        description: Part de la consommation couverte par le thermique
+      - name: taux_couverture_nucleaire_pct
+        description: Part de la consommation couverte par le nucléaire
+      - name: taux_couverture_eolien_pct
+        description: Part de la consommation couverte par l'éolien
+      - name: taux_couverture_solaire_pct
+        description: Part de la consommation couverte par le solaire
+      - name: taux_couverture_hydraulique_pct
+        description: Part de la consommation couverte par l'hydraulique
+      - name: taux_couverture_bioenergies_pct
+        description: Part de la consommation couverte par les bioénergies
+      - name: taux_charge_thermique_pct
+        description: Production thermique rapportée à la capacité installée
+      - name: taux_charge_nucleaire_pct
+        description: Production nucléaire rapportée à la capacité installée
+      - name: taux_charge_eolien_pct
+        description: Production éolienne rapportée à la capacité installée
+      - name: taux_charge_solaire_pct
+        description: Production solaire rapportée à la capacité installée
+      - name: taux_charge_hydraulique_pct
+        description: Production hydraulique rapportée à la capacité installée
+      - name: taux_charge_bioenergies_pct
+        description: Production bioénergies rapportée à la capacité installée
+      - name: source_dataset
+        description: Jeu ODRE d'origine (eco2mix-regional-tr ou eco2mix-regional-cons-def)
+      - name: ingested_at
+        description: Horodatage UTC du chargement en Bronze
+
+  - name: stg_rte_mensuel
+    description: >
+      Consommation électrique régionale Pays de la Loire agrégée au mois, issue uniquement du
+      jeu consolidé/définitif `eco2mix-regional-cons-def` (pas 30 min). Signal temporel mensuel
+      destiné à `mart_correlation_conjoncture` (croisement avec la conjoncture BdF et l'IPI).
+      Grain : une ligne par région × année × mois. Le dernier mois publié peut être incomplet :
+      filtrer sur `est_mois_complet` avant toute corrélation.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [annee, mois, code_insee_region]
+    columns:
+      - name: rte_mensuel_id
+        description: Clé technique (hash de annee + mois + code_insee_region)
+        data_tests: [not_null, unique]
+      - name: annee
+        description: Année civile (heure légale française)
+        data_tests: [not_null]
+      - name: mois
+        description: Mois civil (1 à 12)
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+                quote: false
+      - name: mois_debut
+        description: Premier jour du mois, clé de jointure avec stg_insee_ipi.mois et stg_bdf_pmi.mois
+        data_tests: [not_null]
+      - name: code_insee_region
+        description: Code INSEE de la région
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['52']
+      - name: libelle_region
+        description: Libellé de la région
+      - name: nb_creneaux
+        description: Nombre de créneaux de 30 min agrégés dans le mois
+        data_tests: [not_null]
+      - name: est_mois_complet
+        description: Vrai si le mois contient tous ses créneaux de 30 min (48 par jour)
+        data_tests: [not_null]
+      - name: consommation_mwh
+        description: Consommation totale du mois en MWh (somme des MW par créneau × 0,5 h)
+        data_tests: [not_null]
+
+  - name: stg_enedis_conso
+    description: >
+      Consommation électrique annuelle par commune et grand secteur d'activité (Enedis Open Data).
+      Grain : une ligne par année × commune × grand secteur.
+    columns:
+      - name: enedis_conso_id
+        description: Clé technique (hash de annee + code_commune + code_grand_secteur)
+        data_tests: [not_null, unique]
+      - name: annee
+        description: Année de consommation
+        data_tests: [not_null]
+      - name: code_commune
+        description: Code INSEE de la commune (5 caractères)
+        data_tests: [not_null]
+      - name: nom_commune
+        description: Libellé de la commune
+      - name: code_region
+        description: Code INSEE de la région
+      - name: code_grand_secteur
+        description: Grand secteur d'activité Enedis (industrie, tertiaire, résidentiel, agriculture…)
+        data_tests: [not_null]
+      - name: nb_sites
+        description: Nombre de points de livraison
+      - name: conso_totale_mwh
+        description: Consommation annuelle totale en MWh
+      - name: source_dataset
+        description: Jeu Enedis d'origine
+      - name: ingested_at
+        description: Horodatage UTC du chargement en Bronze
+
+  - name: stg_insee_ipi
+    description: >
+      Indices de production industrielle et séries d'emploi INSEE (BDM).
+      Grain : une ligne par série (idbank) × mois. Dernière version publiée retenue.
+    columns:
+      - name: insee_ipi_id
+        description: Clé technique (hash de idbank + mois)
+        data_tests: [not_null, unique]
+      - name: idbank
+        description: Identifiant de la série INSEE BDM
+        data_tests: [not_null]
+      - name: libelle_serie
+        description: Libellé de la série
+      - name: periode
+        description: Période brute renvoyée par l'API (YYYY-MM)
+      - name: mois
+        description: Premier jour du mois de la période
+        data_tests: [not_null]
+      - name: valeur
+        description: Valeur de l'observation (indice base 100 ou effectif selon la série)
+      - name: statut_observation
+        description: Statut SDMX de l'observation (A = définitif, P = provisoire…)
+      - name: source_dataset
+        description: Jeu INSEE d'origine
+      - name: ingested_at
+        description: Horodatage UTC du chargement en Bronze
+
+  - name: stg_bdf_pmi
+    description: >
+      Indicateurs de l'enquête mensuelle de conjoncture Banque de France (séries CONJ2
+      Pays de la Loire, soldes d'opinion). Utilisés comme proxy régional du PMI.
+      Grain : une ligne par série × mois. Dernière version publiée retenue.
+    columns:
+      - name: bdf_pmi_id
+        description: Clé technique (hash de cle_serie + mois)
+        data_tests: [not_null, unique]
+      - name: cle_serie
+        description: Clé de la série Webstat
+        data_tests: [not_null]
+      - name: libelle_serie
+        description: Libellé de la série
+      - name: periode
+        description: Période brute renvoyée par l'API (YYYY-MM)
+      - name: mois
+        description: Premier jour du mois de la période
+        data_tests: [not_null]
+      - name: valeur
+        description: Solde d'opinion ou indicateur
+      - name: source_dataset
+        description: Jeu Webstat d'origine
+      - name: ingested_at
+        description: Horodatage UTC du chargement en Bronze

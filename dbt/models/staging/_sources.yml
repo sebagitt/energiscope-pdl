@@ -2,10 +2,54 @@ version: 2
 
 sources:
   - name: bronze
-    description: Tables brutes alimentées par les scripts d'ingestion
+    description: >
+      Tables brutes append-only alimentées par les scripts d'ingestion (ingestion/src/).
+      Contrat commun : un enregistrement API par ligne, stocké en JSON brut dans `payload` ;
+      le typage et le dédoublonnage sont faits en staging.
     schema: bronze
+    config:
+      loaded_at_field: ingested_at
+
     tables:
       - name: raw_rte_ecomix
+        description: >
+          RTE eco2mix régional Pays de la Loire (ODRE). Deux jeux coexistent, distingués par
+          `source_dataset` : `eco2mix-regional-tr` (temps réel, pas 15 min, ~3 derniers mois) et
+          `eco2mix-regional-cons-def` (consolidé/définitif, pas 30 min, depuis 2013).
+          `stg_rte_ecomix` les fusionne ; `stg_rte_mensuel` n'utilise que `cons-def`.
+        config:
+          freshness:
+            warn_after: {count: 2, period: hour}
+            error_after: {count: 24, period: hour}
+        columns: &bronze_columns
+          - name: source_dataset
+            description: Identifiant du jeu de données côté API
+            data_tests: [not_null]
+          - name: extracted_for
+            description: Paramètre d'extraction (jour ou période demandée)
+          - name: payload
+            description: Enregistrement JSON brut renvoyé par l'API
+            data_tests: [not_null]
+          - name: ingested_at
+            description: Horodatage UTC du chargement
+            data_tests: [not_null]
+
       - name: raw_enedis_conso
+        description: >
+          Consommation annuelle par commune et grand secteur d'activité (Enedis Open Data).
+          Clés JSON attendues : annee, code_commune, nom_commune, code_region,
+          code_grand_secteur, nb_sites, conso_totale_mwh.
+        columns: *bronze_columns
+
       - name: raw_insee_ipi
+        description: >
+          Observations INSEE BDM (IPI + emploi) aplaties depuis SDMX, une ligne par série × période.
+          Clés JSON attendues : idbank, libelle_serie, time_period (YYYY-MM), obs_value, obs_status.
+        columns: *bronze_columns
+
       - name: raw_bdf_pmi
+        description: >
+          Observations Banque de France Webstat (enquête mensuelle de conjoncture, séries CONJ2
+          Pays de la Loire), une ligne par série × période.
+          Clés JSON attendues : series_key, title_fr, time_period (YYYY-MM), obs_value.
+        columns: *bronze_columns

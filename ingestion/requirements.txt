@@ -1,5 +1,5 @@
-requests
-tenacity
-python-dotenv
-databricks-sql-connector
-pytest
+requests>=2.31
+tenacity>=8.2
+python-dotenv>=1.0
+databricks-sql-connector>=3.0
+pytest>=8.0
