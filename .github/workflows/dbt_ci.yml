@@ -1,0 +1,23 @@
+name: dbt CI
+
+# Passer sur `pull_request` une fois la connexion Databricks configurée (J12)
+on:
+  workflow_dispatch:
+
+jobs:
+  dbt-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dbt
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install dbt-databricks
+      # TODO J12 : profiles.yml CI, dbt deps, slim CI (state:modified+), dbt build

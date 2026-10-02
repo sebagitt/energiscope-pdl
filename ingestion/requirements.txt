@@ -1,0 +1,5 @@
+requests
+tenacity
+python-dotenv
+databricks-sql-connector
+pytest

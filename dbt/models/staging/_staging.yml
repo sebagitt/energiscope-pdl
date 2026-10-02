@@ -1,0 +1,4 @@
+version: 2
+
+models: []
+# TODO J6-J7 : stg_rte_ecomix, stg_enedis_conso, stg_insee_ipi, stg_bdf_pmi

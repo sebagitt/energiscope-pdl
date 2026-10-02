@@ -1,0 +1,19 @@
+name: dbt docs
+
+# Passer sur `push: branches: [main]` une fois la CI en place (J12)
+on:
+  workflow_dispatch:
+
+jobs:
+  dbt-docs:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dbt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install dbt-databricks
+      # TODO J12 : dbt docs generate + publication (GitHub Pages)

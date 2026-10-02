@@ -1,0 +1,11 @@
+version: 2
+
+sources:
+  - name: bronze
+    description: Tables brutes alimentées par les scripts d'ingestion
+    schema: bronze
+    tables:
+      - name: raw_rte_ecomix
+      - name: raw_enedis_conso
+      - name: raw_insee_ipi
+      - name: raw_bdf_pmi

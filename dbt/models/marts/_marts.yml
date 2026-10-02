@@ -1,0 +1,6 @@
+version: 2
+
+models: []
+# TODO J8-J9 : mart_production_regionale, mart_conso_industrielle,
+#              mart_correlation_conjoncture, mart_tension_reseau
+# Documentation obligatoire de chaque colonne

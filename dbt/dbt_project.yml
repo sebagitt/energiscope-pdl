@@ -1,0 +1,27 @@
+name: energiscope_pdl
+version: "1.0.0"
+config-version: 2
+
+profile: energiscope_pdl
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+docs-paths: ["docs"]
+
+clean-targets:
+  - target
+  - dbt_packages
+
+models:
+  energiscope_pdl:
+    staging:
+      +materialized: view
+      +schema: silver
+    intermediate:
+      +materialized: ephemeral
+    marts:
+      +materialized: table
+      +schema: gold
