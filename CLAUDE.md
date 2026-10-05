@@ -69,11 +69,13 @@ energiscope-pdl/
 │   ├── tests/
 │   └── requirements.txt
 ├── airflow/                     ← DAGs Airflow
-│   ├── docker-compose.yml       ← setup officiel Airflow
+│   ├── docker-compose.yml       ← setup officiel Airflow 2.9.3, adapté (voir Commandes fréquentes)
+│   ├── Dockerfile               ← image Airflow + venvs ingestion et dbt + copie du projet
 │   ├── dags/
-│   │   ├── dag_ingestion_rte.py ← toutes les 30min
-│   │   ├── dag_ingestion_daily.py ← Enedis + INSEE + BdF quotidien
-│   │   └── dag_dbt_run.py       ← déclenchement dbt via Databricks Jobs API
+│   │   ├── energiscope_common.py ← chemins, default_args, chargement du .env (pas de DAG)
+│   │   ├── dag_ingestion_rte_realtime.py ← energiscope_rte_realtime, toutes les 15 min (--since 120)
+│   │   ├── dag_ingestion_daily.py ← energiscope_ingestion_daily, 6h00 : Enedis → INSEE → BdF
+│   │   └── dag_dbt_run.py       ← energiscope_dbt, 7h00 : dbt run → test → docs (BashOperator, venv racine)
 │   └── .env                     ← secrets locaux (gitignored)
 ├── dbt/                         ← projet dbt
 │   ├── dbt_project.yml
@@ -101,7 +103,7 @@ Deux venvs séparés, ignorés par git (`.venv/` dans `.gitignore`). Ne jamais l
 |----------------------------------------------------|------------------|--------------------|----------------------------------------------------------------------|
 | dbt : `debug`, `compile`, `run`, `test`, `docs`    | `.venv` (racine) | `dbt/`             | dbt-core, dbt-databricks                                             |
 | Ingestion : scripts `src/*.py` et `pytest`         | `ingestion/.venv`| `ingestion/`       | requests, tenacity, python-dotenv, databricks-sql-connector, pytest  |
-| Airflow                                            | aucun (Docker)   | `airflow/`         | image officielle via `docker compose`                                |
+| Airflow                                            | aucun (Docker)   | `airflow/`         | image `energiscope-airflow` : ses propres venvs Linux `/venvs/ingestion` et `/venvs/dbt` |
 
 **Méthode recommandée (PowerShell) : `scripts/activate_env.ps1`.** Il active le bon venv, charge le `.env` et affiche un résumé (venv, Python, packages clés, variables du `.env` définies ou vides, sans jamais afficher leurs valeurs).
 
@@ -234,7 +236,22 @@ dbt run --select staging           # run uniquement staging
 dbt test                           # tous les tests
 dbt docs generate && dbt docs serve # docs locale
 
-# Airflow (depuis airflow/)
+# Airflow 2.9.3 (depuis airflow/) : UI http://localhost:8080, login airflow / airflow
+# Le docker-compose.yml est l'officiel 2.9.3, avec ces modifications :
+#  - AIRFLOW__CORE__FERNET_KEY lit ${AIRFLOW_FERNET_KEY} (l'officiel la fige à '') ; airflow/.env contient AIRFLOW_UID et la clé
+#  - le port est publié sur 127.0.0.1 uniquement (mot de passe par défaut, pas d'accès depuis le réseau)
+#  - AIRFLOW__CORE__LOAD_EXAMPLES à 'false' (pas de DAGs d'exemple)
+#  - image personnalisée energiscope-airflow:2.9.3 (airflow/Dockerfile), construite par le seul service airflow-init
+#    avec la racine du projet comme contexte ; elle contient /venvs/ingestion et /venvs/dbt (Linux)
+#  - env_file ../.env : DATABRICKS_*, BDF_API_KEY... sont injectées dans les conteneurs (jamais dans l'image : voir .dockerignore)
+#  - ingestion/src et dbt/ montés en lecture seule sous /opt/energiscope : une modification de code ne demande pas de rebuild
+#    (target/, logs/ et dbt_packages/ de dbt sont redirigés vers /tmp/dbt et /opt/energiscope/dbt_packages)
+# Les 3 DAGs (energiscope_rte_realtime, _ingestion_daily, _dbt) sont ACTIFS depuis le 2026-10-05.
+# Limite connue : la fenêtre d'INSEE et de la Banque de France (mois courant) ne charge rien, ces séries étant
+# publiées avec 1 à 3 mois de retard ; l'historique 2025-2026 s'y rattrape à la main avec --start-date.
+# Rebuild nécessaire si requirements.txt, packages.yml ou le Dockerfile changent (pas pour le code : montage) :
+docker compose build --no-cache
+# Première installation : docker compose up airflow-init (migrations + création de l'utilisateur)
 docker compose up -d               # démarrer Airflow
 docker compose down                # arrêter
 docker compose logs -f airflow-scheduler # logs scheduler
@@ -245,7 +262,8 @@ pip install -r requirements.txt
 python src/enedis_conso.py --year 2023 2024                                  # une ou plusieurs années (2011-2024)
 python src/insee_ipi.py --start-date 2020-01 --end-date 2024-12              # séries IPI mensuelles (bornes optionnelles)
 python src/bdf_pmi.py --start-date 2020-01 --end-date 2024-12                # nécessite BDF_API_KEY
-python src/rte_ecomix.py --date 2026-09-30                      # temps réel (~3 derniers mois)
+python src/rte_ecomix.py --date 2026-09-30                      # temps réel (~3 derniers mois), journée entière
+python src/rte_ecomix.py --date 2026-10-05 --since 120          # fenêtre glissante : créneaux des 120 dernières minutes (≤ 8 lignes), --date = simple étiquette
 python src/rte_ecomix.py --dataset cons-def --start-date 2018-01              # backfill mensuel (1 requête + 1 chargement par mois), reprise possible en relançant depuis le mois en échec
 python src/rte_ecomix.py --date 2024-01-01 --dataset cons-def                # un seul jour de l'historique
 pytest tests/ -v                   # tests unitaires

@@ -6,13 +6,17 @@ Deux jeux ODRE au schéma quasi identique :
 
 Chaque enregistrement est stocké tel quel (JSON brut) : l'API renvoie des types instables
 (`"ND"`, nombres sérialisés en chaîne), le typage est fait dans `stg_rte_ecomix`.
+
+Trois modes : un jour (`--date`), un backfill mensuel (`--start-date`), ou une fenêtre glissante
+(`--date` avec `--since N`) qui ne charge que les créneaux des N dernières minutes. La fenêtre sert aux
+exécutions fréquentes (toutes les 15 min) : sans elle, chaque passage rechargerait la journée entière.
 """
 
 import argparse
 import json
 import logging
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 from databricks import sql
@@ -272,6 +276,76 @@ def backfill(start_month: str, end_month: str, dataset: str) -> int:
     return total
 
 
+def positive_int(value: str) -> int:
+    """Valide un entier strictement positif (type argparse pour `--since`).
+
+    Args:
+        value: Chaîne saisie en ligne de commande.
+
+    Returns:
+        L'entier, s'il est supérieur à zéro.
+
+    Raises:
+        argparse.ArgumentTypeError: si la valeur n'est pas un entier strictement positif.
+    """
+    try:
+        number = int(value)
+    except ValueError:
+        number = 0
+    if number <= 0:
+        raise argparse.ArgumentTypeError(f"valeur invalide '{value}' (attendu : entier > 0)")
+    return number
+
+
+def filter_recent(records: list[dict], start: datetime, end: datetime) -> list[dict]:
+    """Garde les créneaux dont le début tombe dans la fenêtre `[start, end[`.
+
+    Les enregistrements sans `date_heure` exploitable sont ignorés. Une date sans fuseau est lue en UTC.
+
+    Args:
+        records: Enregistrements ODRE bruts.
+        start: Début de la fenêtre, inclus (avec fuseau).
+        end: Fin de la fenêtre, exclue (avec fuseau).
+
+    Returns:
+        Les enregistrements de la fenêtre, dans leur ordre d'origine.
+    """
+    recent = []
+    for record in records:
+        try:
+            slot = datetime.fromisoformat(record["date_heure"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if slot.tzinfo is None:
+            slot = slot.replace(tzinfo=timezone.utc)
+        if start <= slot < end:
+            recent.append(record)
+    return recent
+
+
+def fetch_recent(minutes: int, dataset: str, now: datetime | None = None) -> list[dict]:
+    """Récupère les créneaux des `minutes` dernières minutes, relativement à l'instant présent.
+
+    La fenêtre est calculée en UTC et interrogée directement, sans passer par un « jour » : un créneau
+    situé juste après minuit à Paris ne dépend donc d'aucune date logique et ne peut pas être oublié.
+    La fenêtre est semi-ouverte, elle contient `minutes / 15` créneaux au pas de 15 min.
+
+    Args:
+        minutes: Largeur de la fenêtre, en minutes.
+        dataset: Identifiant du jeu ODRE.
+        now: Fin de la fenêtre (instant présent par défaut), avec fuseau.
+
+    Returns:
+        Les enregistrements dont le début de créneau est dans `[now - minutes, now[`.
+    """
+    now = now or datetime.now(timezone.utc)
+    start = now - timedelta(minutes=minutes)
+    records = fetch_window(start.date(), now.date() + timedelta(days=1), dataset)
+    recent = filter_recent(records, start, now)
+    logger.info("%d créneaux sur %d reçus dans la fenêtre [%s, %s[", len(recent), len(records), start, now)
+    return recent
+
+
 def main() -> None:
     """Point d'entrée CLI."""
     parser = argparse.ArgumentParser(description="Ingestion RTE eco2mix régional (PDL)")
@@ -279,6 +353,13 @@ def main() -> None:
     mode.add_argument("--date", type=date.fromisoformat, help="Un seul jour (YYYY-MM-DD, heure locale)")
     mode.add_argument("--start-date", type=year_month, help="Backfill à partir de ce mois (YYYY-MM)")
     parser.add_argument("--end-date", type=year_month, help="Dernier mois du backfill (YYYY-MM), mois courant par défaut")
+    parser.add_argument(
+        "--since",
+        type=positive_int,
+        metavar="MINUTES",
+        help="Avec --date : ne charger que les créneaux des N dernières minutes (ex. 120). "
+        "La fenêtre est relative à l'instant présent ; --date ne sert alors que d'étiquette de chargement.",
+    )
     parser.add_argument(
         "--dataset",
         choices=DATASETS,
@@ -288,6 +369,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.end_date and not args.start_date:
         parser.error("--end-date nécessite --start-date")
+    if args.since and not args.date:
+        parser.error("--since s'utilise avec --date")
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
     load_dotenv()
@@ -298,6 +381,9 @@ def main() -> None:
         if end_month < args.start_date:
             parser.error("--end-date doit être postérieure à --start-date")
         backfill(args.start_date, end_month, dataset)
+    elif args.since:
+        records = fetch_recent(args.since, dataset)
+        load_to_bronze(records, dataset, args.date)
     else:
         records = fetch_records(args.date, dataset)
         load_to_bronze(records, dataset, args.date)

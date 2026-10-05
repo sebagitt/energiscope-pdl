@@ -1,0 +1,33 @@
+# Contexte de build de l'image Airflow (voir airflow/Dockerfile) : seul le strict nécessaire entre.
+# Surtout : jamais de secrets dans une couche d'image.
+
+# Secrets
+.env
+*.env
+**/.env
+dbt/profiles.yml
+
+# Environnements virtuels et caches
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+
+# Sorties dbt
+dbt/target
+dbt/dbt_packages
+dbt/logs
+
+# Hors périmètre de l'image
+.git
+.github
+.vscode
+powerbi
+docs
+scripts
+ingestion/tests
+airflow/logs
+airflow/config
+airflow/plugins
+airflow/dags
