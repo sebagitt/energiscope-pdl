@@ -43,15 +43,15 @@ jobs:
 
     steps:
       - name: Checkout du dépôt
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Installer Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
       - name: Cache pip
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pip
           key: pip-${{ runner.os }}-${{ hashFiles('dbt/requirements.txt') }}
@@ -102,7 +102,7 @@ jobs:
       - name: Télécharger le manifest de référence
         if: steps.reference.outputs.run_id != ''
         continue-on-error: true # artefact expiré : on retombe sur un run complet
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dbt-manifest
           path: dbt/state
@@ -155,7 +155,7 @@ jobs:
 
       - name: Publier le manifest de référence
         if: success() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dbt-manifest
           path: dbt/state_out/manifest.json
@@ -171,7 +171,7 @@ jobs:
 
       - name: Conserver les logs dbt
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dbt-logs
           path: |
