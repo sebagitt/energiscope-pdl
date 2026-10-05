@@ -18,7 +18,13 @@ mensuel as (
         code_insee_region,
         max(libelle_region)                                  as libelle_region,
         count(*)                                             as nb_creneaux,
-        sum(consommation_mw) * {{ heures_par_creneau }}      as consommation_mwh
+        sum(consommation_mw) * {{ heures_par_creneau }}      as consommation_mwh,
+        sum(production_thermique_mw) * {{ heures_par_creneau }}     as production_thermique_mwh,
+        sum(production_nucleaire_mw) * {{ heures_par_creneau }}     as production_nucleaire_mwh,
+        sum(production_eolien_mw) * {{ heures_par_creneau }}        as production_eolien_mwh,
+        sum(production_solaire_mw) * {{ heures_par_creneau }}       as production_solaire_mwh,
+        sum(production_hydraulique_mw) * {{ heures_par_creneau }}   as production_hydraulique_mwh,
+        sum(production_bioenergies_mw) * {{ heures_par_creneau }}   as production_bioenergies_mwh
 
     from cons_def
     where date_locale is not null
@@ -34,6 +40,15 @@ select
     code_insee_region,
     libelle_region,
     nb_creneaux,
-    nb_creneaux = day(last_day(make_date(annee, mois, 1))) * {{ creneaux_par_jour }} as est_mois_complet,
-    consommation_mwh
+    -- Mars perd 1 h (passage à l'heure d'été : 2 créneaux). En octobre, ODRE ne publie pas
+    -- l'heure répétée : le mois garde 48 créneaux par jour, il n'y a rien à ajouter.
+    nb_creneaux = day(last_day(make_date(annee, mois, 1))) * {{ creneaux_par_jour }}
+        - case when mois = 3 then 2 else 0 end                as est_mois_complet,
+    consommation_mwh,
+    production_thermique_mwh,
+    production_nucleaire_mwh,
+    production_eolien_mwh,
+    production_solaire_mwh,
+    production_hydraulique_mwh,
+    production_bioenergies_mwh
 from mensuel

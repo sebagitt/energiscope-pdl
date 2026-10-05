@@ -1,6 +1,206 @@
 version: 2
 
-models: []
-# TODO J8-J9 : mart_production_regionale, mart_conso_industrielle,
-#              mart_correlation_conjoncture, mart_tension_reseau
-# Documentation obligatoire de chaque colonne
+models:
+  - name: mart_conso_industrielle
+    description: >
+      Consommation électrique annuelle du secteur industriel par commune des Pays de la Loire
+      (Enedis Open Data). Destiné à la carte géographique par commune.
+      Grain : une ligne par année × commune × secteur NAF2 × catégorie de consommation.
+      Les sites « PRO » (petits professionnels) n'ont pas de code NAF2 : `code_secteur_naf2` y est vide.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - annee
+              - code_commune
+              - code_secteur_naf2
+              - categorie_consommation
+    columns:
+      - name: conso_industrielle_id
+        description: Clé technique (hash de annee + code_commune + code_secteur_naf2 + categorie_consommation)
+        data_tests: [not_null, unique]
+      - name: annee
+        description: Année de consommation
+        data_tests: [not_null]
+      - name: code_commune
+        description: Code INSEE de la commune (5 caractères), clé de jointure avec le fond de carte
+        data_tests: [not_null]
+      - name: libelle_commune
+        description: Nom de la commune
+      - name: code_secteur_naf2
+        description: Code NAF niveau 2 (division) de l'activité industrielle. Vide pour la catégorie PRO.
+      - name: categorie_consommation
+        description: Catégorie Enedis du site (ENT = entreprises, PRO = petits professionnels)
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['ENT', 'PRO']
+              config:
+                severity: warn
+      - name: conso_mwh
+        description: Consommation annuelle en MWh. Vide quand la source ne publie pas de valeur pour cette maille.
+      - name: nb_points_de_soutirage
+        description: Nombre de sites (points de soutirage) de la maille. Vide quand la source ne publie pas de valeur.
+
+  - name: mart_production_regionale
+    description: >
+      Production et consommation électriques mensuelles de la région, avec le taux de couverture
+      de la consommation par les énergies renouvelables. Issu du jeu consolidé/définitif RTE (pas 30 min).
+      Grain : une ligne par année × mois × région. Filtrer sur `est_mois_complet` pour les analyses
+      de tendance. Énergies renouvelables retenues : éolien, solaire, hydraulique, bioénergies.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [annee, mois, code_insee_region]
+    columns:
+      - name: production_regionale_id
+        description: Clé technique (hash de annee + mois + code_insee_region)
+        data_tests: [not_null, unique]
+      - name: annee
+        description: Année civile (heure légale française)
+        data_tests: [not_null]
+      - name: mois
+        description: Mois civil (1 à 12)
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+                quote: false
+      - name: periode
+        description: Mois au format YYYY-MM, pratique pour les axes de temps
+        data_tests: [not_null]
+      - name: code_insee_region
+        description: Code INSEE de la région
+        data_tests: [not_null]
+      - name: region
+        description: Libellé de la région
+      - name: prod_totale_mwh
+        description: Production totale du mois en MWh (thermique, nucléaire, éolien, solaire, hydraulique, bioénergies)
+        data_tests: [not_null]
+      - name: prod_enr_mwh
+        description: Production renouvelable du mois en MWh (éolien, solaire, hydraulique, bioénergies)
+        data_tests: [not_null]
+      - name: conso_totale_mwh
+        description: Consommation régionale totale du mois en MWh
+        data_tests: [not_null]
+      - name: taux_couverture_enr
+        description: Part de la consommation couverte par la production renouvelable, en % (prod_enr_mwh / conso_totale_mwh × 100)
+        data_tests: [not_null]
+      - name: est_mois_complet
+        description: Vrai si le mois contient tous ses créneaux de 30 min. À filtrer avant toute analyse de tendance.
+        data_tests: [not_null]
+
+  - name: mart_correlation_conjoncture
+    description: >
+      Consommation électrique régionale mensuelle rapprochée de deux indicateurs de conjoncture
+      industrielle : l'indice de production industrielle INSEE (France entière) et le climat des affaires
+      de la Banque de France (Pays de la Loire). Les séries retenues sont paramétrées dans `dbt_project.yml`
+      (`mart_ipi_idbank`, `mart_bdf_series_key`).
+      Grain : une ligne par année × mois, limitée aux mois couverts par les trois sources.
+      La consommation est celle de TOUTE la région (RTE ne distingue pas l'industrie), et non celle de l'industrie seule.
+      Les variations sont mensuelles (mois / mois précédent) et vides pour le premier mois.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [annee, mois]
+    columns:
+      - name: correlation_id
+        description: Clé technique (hash de annee + mois)
+        data_tests: [not_null, unique]
+      - name: annee
+        description: Année civile
+        data_tests: [not_null]
+      - name: mois
+        description: Mois civil (1 à 12)
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+                quote: false
+      - name: periode
+        description: Mois au format YYYY-MM
+        data_tests: [not_null]
+      - name: est_mois_complet
+        description: Vrai si le mois RTE contient tous ses créneaux. Un mois incomplet sous-estime légèrement la consommation.
+        data_tests: [not_null]
+      - name: conso_regionale_mwh
+        description: Consommation électrique totale de la région sur le mois, en MWh (brute, non corrigée des variations saisonnières)
+        data_tests: [not_null]
+      - name: ipi_serie
+        description: Identifiant INSEE (idbank) de la série d'indice de production industrielle retenue
+        data_tests: [not_null]
+      - name: ipi_valeur
+        description: Indice de production industrielle CVS-CJO, base 100 en 2021 (industrie manufacturière, France entière)
+        data_tests: [not_null]
+      - name: bdf_serie
+        description: Clé Webstat de la série Banque de France retenue
+        data_tests: [not_null]
+      - name: bdf_valeur
+        description: Indicateur du climat des affaires de l'industrie manufacturière en Pays de la Loire, CVS
+        data_tests: [not_null]
+      - name: variation_conso_pct
+        description: Variation de la consommation par rapport au mois précédent, en %
+      - name: variation_ipi_pct
+        description: Variation de l'indice de production industrielle par rapport au mois précédent, en %
+      - name: variation_bdf_pct
+        description: Variation de l'indicateur de climat des affaires par rapport au mois précédent, en %
+
+  - name: mart_tension_reseau
+    description: >
+      Couverture de la consommation de la région par sa propre production, à chaque créneau eco2mix
+      (15 min pour le temps réel, 30 min pour le consolidé/définitif).
+      Grain : une ligne par région × créneau. Énergies exprimées sur la durée du créneau
+      (puissance MW × durée en heures). La région est structurellement importatrice : l'écart absolu
+      production − consommation est presque toujours négatif, d'où des indicateurs relatifs
+      (taux de couverture et écart à la moyenne du mois) pour repérer les périodes de forte production.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [date_heure, code_insee_region]
+    columns:
+      - name: tension_id
+        description: Clé technique (hash de code_insee_region + date_heure)
+        data_tests: [not_null, unique]
+      - name: date_heure
+        description: Début du créneau, en UTC
+        data_tests: [not_null]
+      - name: code_insee_region
+        description: Code INSEE de la région
+        data_tests: [not_null]
+      - name: region
+        description: Libellé de la région
+      - name: date
+        description: Date du créneau en heure légale française
+        data_tests: [not_null]
+      - name: heure
+        description: Heure de début du créneau en heure légale française (HH:MM)
+        data_tests: [not_null]
+      - name: pas_minutes
+        description: Durée du créneau en minutes (15 pour le temps réel, 30 pour le consolidé/définitif)
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [15, 30]
+                quote: false
+      - name: prod_mwh
+        description: Production totale de la région sur le créneau, en MWh
+        data_tests: [not_null]
+      - name: conso_mwh
+        description: Consommation de la région sur le créneau, en MWh
+        data_tests: [not_null]
+      - name: ecart_mwh
+        description: Écart production − consommation sur le créneau, en MWh (négatif = déficit couvert par des imports)
+        data_tests: [not_null]
+      - name: taux_couverture_locale
+        description: Part de la consommation couverte par la production de la région sur le créneau, en % (production / consommation × 100)
+        data_tests: [not_null]
+      - name: variation_couverture_pct
+        description: >
+          Écart relatif, en %, entre le taux de couverture du créneau et la moyenne des taux des créneaux
+          du même mois civil (heure locale). Positif = créneau mieux couvert que la moyenne du mois,
+          par exemple lors d'un pic de production éolienne ou solaire.
+        data_tests: [not_null]

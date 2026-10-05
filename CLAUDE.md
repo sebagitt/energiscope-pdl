@@ -213,6 +213,12 @@ Webstat est une instance Opendatasoft : les datasets `conj2-*` du catalogue publ
   - L'historique `cons-def` s'arrête fin juin 2026 : la corrélation n'inclura pas les mois plus récents tant que le jeu n'est pas rafraîchi.
   - Il n'y a pas de nouvelle table Bronze : `stg_rte_mensuel` lit `stg_rte_ecomix` filtré sur `source_dataset`.
 
+### Marts Gold : écarts à la spec initiale
+- **`mart_correlation_conjoncture`** : la colonne est `conso_regionale_mwh`, pas `conso_industrie_mwh`. RTE ne distingue pas l'industrie ; la consommation industrielle n'existe qu'à la maille annuelle (Enedis). Une série par source (`mart_ipi_idbank`, `mart_bdf_series_key` dans `dbt_project.yml`) ; jointure interne, donc 2018-2024 tant que BdF et INSEE ne sont pas rechargés plus loin.
+- **`mart_production_regionale`** : `stg_rte_mensuel` a été étendu avec les productions par filière (MWh). Énergies renouvelables = éolien + solaire + hydraulique + bioénergies.
+- **`mart_tension_reseau`** : énergies en MWh sur la durée du créneau (15 min en temps réel, 30 min en consolidé, colonne `pas_minutes`). Le bilan prod − conso est structurellement négatif (la région importe ~2 100 MW en moyenne), donc l'ancien `statut_tension` (TENSION sur 99,8 % des créneaux) a été supprimé au profit de `taux_couverture_locale` (prod / conso × 100) et `variation_couverture_pct` (écart relatif à la moyenne non pondérée des taux du même mois civil local).
+- **`mart_conso_industrielle`** : le grain inclut la catégorie de consommation (ENT/PRO). Les sites PRO n'ont pas de code NAF2.
+
 ### Banque de France : conjoncture régionale à la place du PMI
 - **Constat :** le PMI est un indice S&P Global ; la Banque de France n'en publie pas.
 - **Choix :** utiliser les séries de l'enquête mensuelle de conjoncture Pays de la Loire (`conj2-m-r52-*` sur Webstat : soldes d'opinion sur la production, les prévisions et l'utilisation des capacités).

@@ -133,11 +133,25 @@ models:
         description: Nombre de créneaux de 30 min agrégés dans le mois
         data_tests: [not_null]
       - name: est_mois_complet
-        description: Vrai si le mois contient tous ses créneaux de 30 min (48 par jour)
+        description: >
+          Vrai si le mois contient tous ses créneaux de 30 min (48 par jour, 2 de moins en mars à
+          cause du passage à l'heure d'été ; ODRE ne publie pas l'heure répétée d'octobre)
         data_tests: [not_null]
       - name: consommation_mwh
         description: Consommation totale du mois en MWh (somme des MW par créneau × 0,5 h)
         data_tests: [not_null]
+      - name: production_thermique_mwh
+        description: Production thermique fossile du mois en MWh. Vide si la source n'a aucune valeur sur le mois.
+      - name: production_nucleaire_mwh
+        description: Production nucléaire du mois en MWh. Vide si la source n'a aucune valeur sur le mois (pas de centrale en Pays de la Loire).
+      - name: production_eolien_mwh
+        description: Production éolienne totale (terrestre et en mer) du mois en MWh
+      - name: production_solaire_mwh
+        description: Production solaire du mois en MWh
+      - name: production_hydraulique_mwh
+        description: Production hydraulique du mois en MWh
+      - name: production_bioenergies_mwh
+        description: Production bioénergies du mois en MWh
 
   - name: stg_enedis_conso
     description: >

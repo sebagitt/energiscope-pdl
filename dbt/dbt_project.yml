@@ -15,6 +15,11 @@ clean-targets:
   - target
   - dbt_packages
 
+vars:
+  # Séries retenues pour mart_correlation_conjoncture (une série par source, voir stg_insee_ipi / stg_bdf_pmi)
+  mart_ipi_idbank: "010768265"                              # IPI CVS-CJO, industrie manufacturière (section C)
+  mart_bdf_series_key: "CONJ2.M.R52.S.IN.000CZ.ICAIN000.10" # BdF PDL, climat des affaires, industrie manufacturière, CVS
+
 models:
   energiscope_pdl:
     staging:
