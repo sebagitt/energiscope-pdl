@@ -8,6 +8,8 @@ name: dbt docs
 on:
   push:
     branches: [main]
+  # Relance manuelle depuis l'onglet Actions (le déploiement reste réservé à main : voir l'environnement github-pages)
+  workflow_dispatch:
 
 permissions:
   contents: read
