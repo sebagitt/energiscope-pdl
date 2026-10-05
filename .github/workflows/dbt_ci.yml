@@ -1,12 +1,33 @@
 name: dbt CI
 
-# Passer sur `pull_request` une fois la connexion Databricks configurée (J12)
+# Valide chaque changement dbt avant merge : compilation, puis run et tests des seuls modèles modifiés
+# (slim CI) dans des schémas dédiés (<DBT_SCHEMA>_silver / <DBT_SCHEMA>_gold), jamais dans la production.
+#
+# Secrets requis (Settings > Secrets and variables > Actions) : DATABRICKS_HOST, DATABRICKS_TOKEN,
+# DATABRICKS_HTTP_PATH, DBT_CATALOG, DBT_SCHEMA. Voir CLAUDE.md, section « CI/CD GitHub Actions ».
 on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  # Lancement manuel : sert surtout à (re)générer le manifest de référence depuis main
   workflow_dispatch:
 
+# Une validation à la fois : toutes les exécutions partagent les schémas ci_silver / ci_gold.
+# Une exécution en attente peut être remplacée par une plus récente.
+concurrency:
+  group: dbt-ci
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read # télécharger le manifest d'une exécution précédente
+
 jobs:
-  dbt-test:
+  dbt-ci:
+    name: Valider les modèles dbt
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: dbt
@@ -14,10 +35,146 @@ jobs:
       DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
       DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
       DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+      DBT_CATALOG: ${{ secrets.DBT_CATALOG }}
+      DBT_SCHEMA: ${{ secrets.DBT_SCHEMA }}
+      DBT_PROFILES_DIR: ${{ github.workspace }}/dbt/ci
+      # Les pull requests venant d'un fork n'ont pas accès aux secrets : seule la compilation tourne alors
+      HAS_SECRETS: ${{ secrets.DATABRICKS_TOKEN != '' }}
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout du dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Python 3.11
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install dbt-databricks
-      # TODO J12 : profiles.yml CI, dbt deps, slim CI (state:modified+), dbt build
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('dbt/requirements.txt') }}
+          restore-keys: pip-${{ runner.os }}-
+
+      - name: Installer dbt-databricks
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          dbt --version
+
+      - name: Vérifier les secrets
+        if: env.HAS_SECRETS == 'true'
+        run: |
+          for name in DATABRICKS_HOST DATABRICKS_HTTP_PATH DBT_CATALOG DBT_SCHEMA; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Le secret $name est absent ou vide (voir CLAUDE.md, section CI/CD GitHub Actions)."
+              exit 1
+            fi
+          done
+
+      - name: Avertir de l'absence de secrets
+        if: env.HAS_SECRETS != 'true'
+        run: |
+          echo "::warning::Secrets indisponibles (pull request d'un fork ?) : seule la compilation est exécutée."
+
+      - name: dbt deps
+        run: dbt deps
+
+      # Vérifie la syntaxe et les références sans se connecter à Databricks
+      - name: dbt compile
+        run: dbt compile --target ci --no-populate-cache
+
+      # Manifest du dernier run réussi sur main, généré avec la cible « prod » : il sert à la fois de
+      # référence pour state:modified et de source des modèles non modifiés (--defer, lecture seule).
+      - name: Trouver le manifest de référence
+        id: reference
+        if: env.HAS_SECRETS == 'true'
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow dbt_ci.yml --branch main \
+            --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "Dernier run réussi sur main : ${run_id:-aucun}"
+
+      - name: Télécharger le manifest de référence
+        if: steps.reference.outputs.run_id != ''
+        continue-on-error: true # artefact expiré : on retombe sur un run complet
+        uses: actions/download-artifact@v4
+        with:
+          name: dbt-manifest
+          path: dbt/state
+          run-id: ${{ steps.reference.outputs.run_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Choisir le mode (slim ou complet)
+        id: mode
+        if: env.HAS_SECRETS == 'true'
+        run: |
+          if [ -f state/manifest.json ]; then
+            echo "slim=true" >> "$GITHUB_OUTPUT"
+            echo "Mode slim CI : seuls les modèles modifiés et leurs descendants sont construits."
+          else
+            echo "slim=false" >> "$GITHUB_OUTPUT"
+            echo "Aucun manifest de référence : run complet (staging et marts)."
+          fi
+
+      - name: dbt run
+        if: env.HAS_SECRETS == 'true'
+        run: |
+          if [ "${{ steps.mode.outputs.slim }}" = "true" ]; then
+            dbt run --target ci --select state:modified+ --defer --state state
+          else
+            dbt run --target ci --select staging marts
+          fi
+
+      - name: Résumé du run
+        if: always() && env.HAS_SECRETS == 'true'
+        run: python ../.github/scripts/dbt_summary.py "dbt run" target/run_results.json
+
+      - name: dbt test
+        if: env.HAS_SECRETS == 'true'
+        run: |
+          if [ "${{ steps.mode.outputs.slim }}" = "true" ]; then
+            dbt test --target ci --select state:modified+ --defer --state state
+          else
+            dbt test --target ci --select staging marts
+          fi
+
+      - name: Résumé des tests
+        if: always() && env.HAS_SECRETS == 'true'
+        run: python ../.github/scripts/dbt_summary.py "dbt test" target/run_results.json
+
+      # Seul main publie le manifest de référence (cible « prod » : schémas silver et gold, compilation seule)
+      - name: Générer le manifest de référence
+        if: success() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: dbt compile --target prod --no-populate-cache --target-path state_out
+
+      - name: Publier le manifest de référence
+        if: success() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-manifest
+          path: dbt/state_out/manifest.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Logs dbt complets
+        if: failure()
+        run: |
+          echo "::group::dbt/logs/dbt.log"
+          cat logs/dbt.log || echo "Pas de fichier de logs."
+          echo "::endgroup::"
+
+      - name: Conserver les logs dbt
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-logs
+          path: |
+            dbt/logs
+            dbt/target/run_results.json
+          if-no-files-found: ignore

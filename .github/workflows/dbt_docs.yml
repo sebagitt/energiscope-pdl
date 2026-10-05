@@ -1,19 +1,117 @@
 name: dbt docs
 
-# Passer sur `push: branches: [main]` une fois la CI en place (J12)
+# Publie la documentation dbt (index.html, catalog.json, manifest.json) sur GitHub Pages à chaque push sur main.
+#
+# Étape manuelle, une seule fois : Settings > Pages > Build and deployment > Source = « GitHub Actions ».
+# Secrets requis : DATABRICKS_HOST, DATABRICKS_TOKEN, DATABRICKS_HTTP_PATH, DBT_CATALOG, DBT_SCHEMA.
+# Voir CLAUDE.md, section « CI/CD GitHub Actions ».
 on:
-  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Un déploiement à la fois ; on laisse le déploiement en cours se terminer
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
-  dbt-docs:
+  build:
+    name: Générer la documentation
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: dbt
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+      DBT_CATALOG: ${{ secrets.DBT_CATALOG }}
+      DBT_SCHEMA: ${{ secrets.DBT_SCHEMA }}
+      DBT_PROFILES_DIR: ${{ github.workspace }}/dbt/ci
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout du dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Python 3.11
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install dbt-databricks
-      # TODO J12 : dbt docs generate + publication (GitHub Pages)
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('dbt/requirements.txt') }}
+          restore-keys: pip-${{ runner.os }}-
+
+      - name: Installer dbt-databricks
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          dbt --version
+
+      - name: Vérifier les secrets
+        run: |
+          for name in DATABRICKS_HOST DATABRICKS_TOKEN DATABRICKS_HTTP_PATH DBT_CATALOG DBT_SCHEMA; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Le secret $name est absent ou vide (voir CLAUDE.md, section CI/CD GitHub Actions)."
+              exit 1
+            fi
+          done
+
+      - name: dbt deps
+        run: dbt deps
+
+      # Cible « prod » : le catalogue décrit les vraies tables silver et gold (lecture seule, aucun modèle construit)
+      - name: dbt docs generate
+        run: dbt docs generate --target prod
+
+      - name: Préparer le site
+        run: |
+          mkdir -p ../docs_site
+          cp target/index.html target/catalog.json target/manifest.json ../docs_site/
+          touch ../docs_site/.nojekyll
+          ls -la ../docs_site
+
+      - name: Configurer GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Publier l'artefact du site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs_site
+
+      - name: Logs dbt complets
+        if: failure()
+        run: |
+          echo "::group::dbt/logs/dbt.log"
+          cat logs/dbt.log || echo "Pas de fichier de logs."
+          echo "::endgroup::"
+
+      - name: Conserver les logs dbt
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-logs
+          path: dbt/logs
+          if-no-files-found: ignore
+
+  deploy:
+    name: Déployer sur GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Déployer
+        id: deployment
+        uses: actions/deploy-pages@v4

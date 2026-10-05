@@ -29,3 +29,8 @@ airflow/logs/*
 .DS_Store
 Thumbs.db
 .vscode/
+
+# Sorties locales des workflows GitHub Actions
+dbt/state/
+dbt/state_out/
+docs_site/

@@ -57,9 +57,10 @@ energiscope-pdl/
 ├── CLAUDE.md                    ← ce fichier
 ├── README.md
 ├── .github/
-│   └── workflows/
-│       ├── dbt_ci.yml           ← dbt test + slim CI
-│       └── dbt_docs.yml         ← génération docs
+│   ├── workflows/
+│   │   ├── dbt_ci.yml           ← compile + run/test slim CI (push et PR sur main/develop)
+│   │   └── dbt_docs.yml         ← docs dbt publiées sur GitHub Pages (push sur main)
+│   └── scripts/dbt_summary.py   ← résumé Markdown des résultats dbt pour la page du workflow
 ├── ingestion/                   ← scripts Python d'ingestion
 │   ├── src/
 │   │   ├── rte_ecomix.py        ← API RTE eco2mix (15min, --dataset cons-def pour l'historique)
@@ -134,7 +135,7 @@ ingestion/.venv/Scripts/python -m pytest ingestion/tests -v
 - `pytest` et `tenacity` n'existent que dans `ingestion/.venv` ; `dbt` n'existe que dans `.venv`. Une commande qui échoue avec « module introuvable » signifie presque toujours le mauvais venv.
 - Dépendance d'ingestion : l'ajouter à `ingestion/requirements.txt`, puis `pip install -r` dans `ingestion/.venv`.
 - Paquets dbt (ex. `dbt_utils`) : `dbt/packages.yml` puis `dbt deps`, pas `pip`.
-- Le venv racine n'a pas de fichier de dépendances : les versions de dbt ne sont pas épinglées dans le dépôt.
+- Les versions de dbt sont épinglées dans `dbt/requirements.txt` (utilisé par les workflows GitHub Actions ; le Dockerfile Airflow épingle les mêmes).
 - Recréation : `python -m venv .venv && .venv/Scripts/python -m pip install dbt-databricks` (idem dans `ingestion/` avec `-r requirements.txt`).
 
 ## Conventions de code
@@ -226,6 +227,72 @@ Webstat est une instance Opendatasoft : les datasets `conj2-*` du catalogue publ
 - **Choix :** utiliser les séries de l'enquête mensuelle de conjoncture Pays de la Loire (`conj2-m-r52-*` sur Webstat : soldes d'opinion sur la production, les prévisions et l'utilisation des capacités).
 - **Conséquences :** indicateur régional (plus pertinent pour la PDL que le PMI national). Les noms `raw_bdf_pmi` / `stg_bdf_pmi` sont conservés.
 
+## CI/CD GitHub Actions
+
+Deux workflows dans `.github/workflows/`. **Ils n'ont pas encore tourné sur GitHub** : seules leurs commandes dbt ont été répétées en local (compilation, sélection `state:modified`, `dbt docs generate`). Ils ne fonctionneront qu'après configuration des secrets ci-dessous.
+
+| Workflow | Déclencheur | Rôle |
+|---|---|---|
+| `dbt_ci.yml` | push et pull request sur `main` et `develop` (+ lancement manuel) | `dbt deps`, `dbt compile` (sans connexion), puis `dbt run` et `dbt test` des seuls modèles modifiés (`state:modified+`) |
+| `dbt_docs.yml` | push sur `main` | `dbt docs generate`, puis publication de `index.html`, `catalog.json` et `manifest.json` sur GitHub Pages |
+
+Les deux ont un timeout de 20 minutes, un cache pip, la sortie dbt dans le log de chaque étape, et en cas d'échec `dbt/logs/dbt.log` complet affiché puis conservé comme artefact `dbt-logs`.
+
+### Les 5 secrets à configurer
+
+GitHub > Settings > Secrets and variables > Actions > New repository secret :
+
+| Secret | Valeur |
+|---|---|
+| `DATABRICKS_HOST` | URL du workspace, la même que dans le `.env` (`https://dbc-….cloud.databricks.com`) |
+| `DATABRICKS_TOKEN` | Personal Access Token Databricks ; préférer un token dédié à la CI, révocable séparément |
+| `DATABRICKS_HTTP_PATH` | Chemin du SQL warehouse (`/sql/1.0/warehouses/<id>`) |
+| `DBT_CATALOG` | Catalogue Unity Catalog (`workspace`) |
+| `DBT_SCHEMA` | Préfixe des schémas de la CI : **`ci`** (voir ci-dessous) |
+
+En ligne de commande (la valeur est demandée à l'invite, donc absente de l'historique du shell) :
+
+```bash
+gh secret set DATABRICKS_HOST
+gh secret set DATABRICKS_TOKEN
+gh secret set DATABRICKS_HTTP_PATH
+gh secret set DBT_CATALOG
+gh secret set DBT_SCHEMA
+```
+
+Les pull requests venant d'un fork n'ont pas accès aux secrets : seule la compilation y tourne.
+
+### La CI n'écrit jamais en production
+
+`dbt/macros/generate_schema_name.sql` renvoie `silver` et `gold` tels quels, sauf avec la cible `ci` : les modèles y sont construits dans `<DBT_SCHEMA>_silver` et `<DBT_SCHEMA>_gold` (`ci_silver`, `ci_gold`). Le profil des workflows est `dbt/ci/profiles.yml` (cibles `ci` et `prod`, aucun secret, tout vient de l'environnement). La cible `prod` ne sert qu'à lire les métadonnées pour la documentation : n'y jamais lancer `dbt run`. Ces schémas de CI persistent entre les exécutions ; nettoyage manuel : `DROP SCHEMA IF EXISTS workspace.ci_silver CASCADE` (idem `ci_gold`).
+
+### Slim CI et manifest de référence
+
+`state:modified` compare le projet courant au manifest d'un état précédent. Le manifest de référence est généré avec la cible `prod` (compilation seule) puis publié comme artefact `dbt-manifest` (actions/upload-artifact, conservé 90 jours) à chaque exécution réussie sur `main`. Les autres exécutions le récupèrent depuis le dernier run réussi de `main` (actions/download-artifact avec `run-id`) et l'utilisent aussi pour `--defer` : les modèles non modifiés sont lus dans la vraie production, en lecture seule. Sans manifest (premier run, artefact expiré), la CI construit tout (`staging` et `marts`) dans les schémas `ci_*`.
+
+Un artefact ne peut pas être envoyé à la main (ni par `gh`, ni par l'API) : seul un run de workflow le crée. Pour l'amorcer, et pour le vérifier ou le récupérer :
+
+```bash
+gh workflow run dbt_ci.yml --ref main                         # lance le workflow sur main (déclencheur manuel) : crée l'artefact
+gh run list --workflow dbt_ci.yml --branch main --limit 5     # trouver le dernier run réussi
+gh run download <run-id> -n dbt-manifest -D /tmp/dbt-state    # récupérer manifest.json en local
+```
+
+Reproduire la sélection en local (profil CI, sans connexion). Sous Git Bash, protéger le chemin du warehouse, sinon il est réécrit en `C:/Program Files/Git/sql/...` :
+
+```bash
+export MSYS2_ENV_CONV_EXCL="DATABRICKS_HTTP_PATH;DATABRICKS_HOST" DBT_CATALOG=workspace DBT_SCHEMA=ci DBT_PROFILES_DIR=$PWD/dbt/ci
+cd dbt
+dbt compile --target prod --no-populate-cache --target-path state_out        # le manifest de référence
+dbt ls --target ci --select state:modified+ --state /tmp/dbt-state --resource-type model
+```
+
+### Activer GitHub Pages (étape manuelle, une seule fois)
+
+1. GitHub > Settings > Pages > Build and deployment > **Source : « GitHub Actions »** (sans cela, `dbt_docs.yml` échoue à l'étape de configuration de Pages).
+2. Le dépôt doit être public, ou le plan GitHub doit autoriser Pages sur un dépôt privé. Le site est public : il montre le SQL des modèles, leurs descriptions et les noms de colonnes (jamais de données ni de secrets : vérifié sur les trois fichiers publiés).
+3. Au premier push sur `main`, le site apparaît sur `https://sebagitt.github.io/energiscope-pdl/`.
+
 ## Commandes fréquentes
 
 ```bash
@@ -268,8 +335,7 @@ python src/rte_ecomix.py --dataset cons-def --start-date 2018-01              # 
 python src/rte_ecomix.py --date 2024-01-01 --dataset cons-def                # un seul jour de l'historique
 pytest tests/ -v                   # tests unitaires
 
-# GitHub Actions (déclenché sur push)
-# Voir .github/workflows/dbt_ci.yml
+# GitHub Actions : voir la section « CI/CD GitHub Actions » ci-dessus
 ```
 
 ## Tâches en cours (mettre à jour régulièrement)

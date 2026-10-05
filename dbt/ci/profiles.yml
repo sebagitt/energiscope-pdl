@@ -1,0 +1,19 @@
+# Profil dbt des workflows GitHub Actions (.github/workflows). Aucun secret : tout vient de l'environnement.
+#
+# ci   : validation des pull requests. Les modèles sont construits dans <DBT_SCHEMA>_silver et
+#        <DBT_SCHEMA>_gold (voir macros/generate_schema_name.sql) et JAMAIS dans silver / gold.
+# prod : lecture des métadonnées de production, pour générer la documentation (dbt docs generate).
+#        Ne pas y lancer dbt run.
+energiscope_pdl:
+  target: ci
+  outputs:
+    ci: &connection
+      type: databricks
+      host: "{{ env_var('DATABRICKS_HOST') | replace('https://', '') }}"
+      http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
+      token: "{{ env_var('DATABRICKS_TOKEN') }}"
+      catalog: "{{ env_var('DBT_CATALOG') }}"
+      schema: "{{ env_var('DBT_SCHEMA') }}"
+      threads: 4
+    prod:
+      <<: *connection
