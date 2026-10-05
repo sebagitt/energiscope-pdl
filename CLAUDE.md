@@ -250,14 +250,17 @@ GitHub > Settings > Secrets and variables > Actions > New repository secret :
 | `DBT_CATALOG` | Catalogue Unity Catalog (`workspace`) |
 | `DBT_SCHEMA` | Préfixe des schémas de la CI : **`ci`** (voir ci-dessous) |
 
-En ligne de commande (la valeur est demandée à l'invite, donc absente de l'historique du shell) :
+**Coller la valeur seule, jamais la ligne du `.env`.** `DATABRICKS_HOST=https://dbc-…` collé tel quel donne un hôte `databricks_host=…` : dbt reste bloqué ~15 minutes puis échoue (arrivé au premier run du 2026-10-05). Les workflows vérifient désormais le format (`.github/scripts/check_secrets.sh`) et testent la connexion (`dbt debug --connection`, 180 s max) avant tout `dbt run`.
+
+En ligne de commande, la valeur est lue dans le `.env` local sans être affichée (depuis la racine du projet, Git Bash) :
 
 ```bash
-gh secret set DATABRICKS_HOST
-gh secret set DATABRICKS_TOKEN
-gh secret set DATABRICKS_HTTP_PATH
-gh secret set DBT_CATALOG
-gh secret set DBT_SCHEMA
+for name in DATABRICKS_HOST DATABRICKS_TOKEN DATABRICKS_HTTP_PATH; do
+  gh secret set "$name" --body "$(grep "^$name=" .env | cut -d= -f2- | tr -d '\r')"
+done
+gh secret set DBT_CATALOG --body "workspace"
+gh secret set DBT_SCHEMA --body "ci"
+gh secret list      # vérifier les noms et les dates (les valeurs ne sont jamais lisibles)
 ```
 
 Les pull requests venant d'un fork n'ont pas accès aux secrets : seule la compilation y tourne.

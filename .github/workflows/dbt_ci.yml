@@ -65,13 +65,8 @@ jobs:
 
       - name: Vérifier les secrets
         if: env.HAS_SECRETS == 'true'
-        run: |
-          for name in DATABRICKS_HOST DATABRICKS_HTTP_PATH DBT_CATALOG DBT_SCHEMA; do
-            if [ -z "${!name}" ]; then
-              echo "::error::Le secret $name est absent ou vide (voir CLAUDE.md, section CI/CD GitHub Actions)."
-              exit 1
-            fi
-          done
+        working-directory: .
+        run: bash .github/scripts/check_secrets.sh
 
       - name: Avertir de l'absence de secrets
         if: env.HAS_SECRETS != 'true'
@@ -84,6 +79,15 @@ jobs:
       # Vérifie la syntaxe et les références sans se connecter à Databricks
       - name: dbt compile
         run: dbt compile --target ci --no-populate-cache
+
+      # Échoue en 3 minutes au lieu de bloquer ~15 minutes si Databricks est injoignable
+      - name: Tester la connexion Databricks
+        if: env.HAS_SECRETS == 'true'
+        run: |
+          timeout 180 dbt debug --target ci --connection || {
+            echo "::error::Connexion à Databricks impossible ou plus de 180 s : vérifier DATABRICKS_HOST, DATABRICKS_HTTP_PATH, DATABRICKS_TOKEN et le démarrage du warehouse."
+            exit 1
+          }
 
       # Manifest du dernier run réussi sur main, généré avec la cible « prod » : il sert à la fois de
       # référence pour state:modified et de source des modèles non modifiés (--defer, lecture seule).
@@ -150,11 +154,11 @@ jobs:
 
       # Seul main publie le manifest de référence (cible « prod » : schémas silver et gold, compilation seule)
       - name: Générer le manifest de référence
-        if: success() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: success() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && env.HAS_SECRETS == 'true'
         run: dbt compile --target prod --no-populate-cache --target-path state_out
 
       - name: Publier le manifest de référence
-        if: success() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: success() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && env.HAS_SECRETS == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: dbt-manifest

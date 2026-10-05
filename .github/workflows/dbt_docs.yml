@@ -58,16 +58,19 @@ jobs:
           dbt --version
 
       - name: Vérifier les secrets
-        run: |
-          for name in DATABRICKS_HOST DATABRICKS_TOKEN DATABRICKS_HTTP_PATH DBT_CATALOG DBT_SCHEMA; do
-            if [ -z "${!name}" ]; then
-              echo "::error::Le secret $name est absent ou vide (voir CLAUDE.md, section CI/CD GitHub Actions)."
-              exit 1
-            fi
-          done
+        working-directory: .
+        run: bash .github/scripts/check_secrets.sh
 
       - name: dbt deps
         run: dbt deps
+
+      # Échoue en 3 minutes au lieu de bloquer ~15 minutes si Databricks est injoignable
+      - name: Tester la connexion Databricks
+        run: |
+          timeout 180 dbt debug --target prod --connection || {
+            echo "::error::Connexion à Databricks impossible ou plus de 180 s : vérifier DATABRICKS_HOST, DATABRICKS_HTTP_PATH, DATABRICKS_TOKEN et le démarrage du warehouse."
+            exit 1
+          }
 
       # Cible « prod » : le catalogue décrit les vraies tables silver et gold (lecture seule, aucun modèle construit)
       - name: dbt docs generate
