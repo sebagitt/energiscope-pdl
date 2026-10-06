@@ -53,6 +53,10 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [annee, mois, code_insee_region]
+      # Les 4 filières renouvelables doivent sommer exactement à prod_enr_mwh
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "abs(prod_eolien_mwh + prod_solaire_mwh + prod_hydraulique_mwh + prod_bioenergies_mwh - prod_enr_mwh) < 0.001"
     columns:
       - name: production_regionale_id
         description: Clé technique (hash de annee + mois + code_insee_region)
@@ -81,6 +85,18 @@ models:
         data_tests: [not_null]
       - name: prod_enr_mwh
         description: Production renouvelable du mois en MWh (éolien, solaire, hydraulique, bioénergies)
+        data_tests: [not_null]
+      - name: prod_eolien_mwh
+        description: Production éolienne du mois en MWh (terrestre et en mer)
+        data_tests: [not_null]
+      - name: prod_solaire_mwh
+        description: Production solaire du mois en MWh
+        data_tests: [not_null]
+      - name: prod_hydraulique_mwh
+        description: Production hydraulique du mois en MWh
+        data_tests: [not_null]
+      - name: prod_bioenergies_mwh
+        description: Production des bioénergies du mois en MWh
         data_tests: [not_null]
       - name: conso_totale_mwh
         description: Consommation régionale totale du mois en MWh

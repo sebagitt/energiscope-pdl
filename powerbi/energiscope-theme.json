@@ -1,0 +1,122 @@
+{
+  "name": "EnergiScope PDL",
+  "dataColors": [
+    "#00c4a0",
+    "#3b82f6",
+    "#f59e0b",
+    "#a78bfa",
+    "#f87171",
+    "#34d399",
+    "#fb923c",
+    "#60a5fa"
+  ],
+  "background": "#0f1923",
+  "foreground": "#00c4a0",
+  "tableAccent": "#00c4a0",
+  "textClasses": {
+    "callout": {
+      "fontSize": 40,
+      "fontFace": "Segoe UI",
+      "color": "#ffffff"
+    },
+    "title": {
+      "fontSize": 14,
+      "fontFace": "Segoe UI",
+      "color": "#ffffff"
+    },
+    "header": {
+      "fontSize": 12,
+      "fontFace": "Segoe UI",
+      "color": "#8aa4b8"
+    },
+    "label": {
+      "fontSize": 10,
+      "fontFace": "Segoe UI",
+      "color": "#8aa4b8"
+    }
+  },
+  "visualStyles": {
+    "*": {
+      "*": {
+        "fontFamily": [{ "fontFamily": "Segoe UI" }],
+        "border": [{ "show": false }]
+      }
+    },
+    "page": {
+      "*": {
+        "background": [{
+          "color": { "solid": { "color": "#0f1923" } },
+          "transparency": 0
+        }]
+      }
+    },
+    "card": {
+      "*": {
+        "dataLabel": [{
+          "color": { "solid": { "color": "#ffffff" } },
+          "fontSize": 24
+        }],
+        "categoryLabel": [{
+          "show": true,
+          "color": { "solid": { "color": "#8aa4b8" } },
+          "fontSize": 10
+        }]
+      }
+    },
+    "barChart": {
+      "*": {
+        "categoryAxis": [{
+          "labelColor": { "solid": { "color": "#8aa4b8" } },
+          "fontSize": 10
+        }],
+        "valueAxis": [{
+          "labelColor": { "solid": { "color": "#8aa4b8" } },
+          "fontSize": 10,
+          "gridlineColor": { "solid": { "color": "#1e3048" } }
+        }],
+        "legend": [{
+          "labelColor": { "solid": { "color": "#8aa4b8" } },
+          "fontSize": 10
+        }]
+      }
+    },
+    "lineChart": {
+      "*": {
+        "categoryAxis": [{
+          "labelColor": { "solid": { "color": "#8aa4b8" } },
+          "fontSize": 10,
+          "gridlineColor": { "solid": { "color": "#1e3048" } }
+        }],
+        "valueAxis": [{
+          "labelColor": { "solid": { "color": "#8aa4b8" } },
+          "fontSize": 10,
+          "gridlineColor": { "solid": { "color": "#1e3048" } }
+        }],
+        "legend": [{
+          "labelColor": { "solid": { "color": "#8aa4b8" } },
+          "fontSize": 10
+        }]
+      }
+    },
+    "tableEx": {
+      "*": {
+        "values": [{
+          "fontColorPrimary": { "solid": { "color": "#e2e8f0" } },
+          "fontColorSecondary": { "solid": { "color": "#cbd5e1" } },
+          "backgroundPrimary": { "solid": { "color": "#132233" } },
+          "backgroundSecondary": { "solid": { "color": "#0f1923" } },
+          "fontSize": 11
+        }],
+        "columnHeaders": [{
+          "fontColor": { "solid": { "color": "#8aa4b8" } },
+          "background": { "solid": { "color": "#0d1720" } },
+          "fontSize": 11
+        }],
+        "grid": [{
+          "gridVertical": false,
+          "gridHorizontalColor": { "solid": { "color": "#1e3048" } }
+        }]
+      }
+    }
+  }
+}

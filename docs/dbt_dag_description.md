@@ -155,10 +155,16 @@ Aucun `select *` dans cette couche : chaque colonne est nommée et documentée.
 ### `mart_production_regionale` : 102 lignes
 
 `stg_rte_mensuel` : production totale, production renouvelable (éolien, solaire, hydraulique,
-bioénergies), consommation et `taux_couverture_enr` (production renouvelable ÷ consommation × 100).
+bioénergies), production de chacune de ces 4 filières (`prod_eolien_mwh`, `prod_solaire_mwh`,
+`prod_hydraulique_mwh`, `prod_bioenergies_mwh`), consommation et `taux_couverture_enr` (production
+renouvelable ÷ consommation × 100).
 
 - Les valeurs vides d'une filière comptent pour zéro dans les sommes : le nucléaire est absent en
   Pays de la Loire.
+- Les totaux sont calculés à partir des colonnes par filière ; un test dbt vérifie que les 4 filières
+  somment exactement à `prod_enr_mwh`.
+- Sur toute la période, l'éolien fournit 65 % de la production renouvelable, le solaire 24 %, les
+  bioénergies 10 % et l'hydraulique 0,5 %.
 - Le taux moyen est de 19 %, de 6,6 % à 41,9 % selon le mois. Filtrer sur `est_mois_complet` pour
   toute analyse de tendance.
 
