@@ -12,6 +12,18 @@ Pipeline analytique sur la consommation électrique industrielle en Pays de la L
 > "La consommation électrique des sites industriels (C1-C4) en PDL varie-t-elle avec les
 > indicateurs conjoncturels sectoriels (conjoncture régionale Banque de France, IPI) — et peut-on anticiper des tensions réseau 24h avant ?"
 
+## État du projet
+
+Mis à jour le 6 octobre 2026. Détail technique : `docs/architecture.md`.
+
+- **Pipeline complet et fonctionnel :** ingestion Python (RTE, Enedis, INSEE, Banque de France), puis Bronze, Silver et Gold, orchestré par Airflow (3 DAGs actifs). 9 modèles dbt, 101 tests au vert, CI GitHub Actions et documentation dbt publiée sur GitHub Pages.
+- **Power BI :** 4 pages validées. Dashboard à usage portfolio uniquement ; les slicers sont limités à la page 1. Le fichier `.pbix` n'est pas versionné.
+- **Limites connues :**
+  - Enedis est annuel et seules 2023 et 2024 sont chargées (2025 non publié).
+  - Les slicers ne sont pas cross-marts : un filtre n'agit pas d'une table Gold sur une autre.
+  - La consommation corrélée à la conjoncture est celle de toute la région, pas celle de l'industrie (corrélation faible : 0,13).
+  - Les marts mensuels s'arrêtent en juin 2026 (limite du jeu consolidé de RTE).
+
 ## Architecture médaillon (Bronze / Silver / Gold)
 
 ```
@@ -90,10 +102,10 @@ energiscope-pdl/
 │   └── docs/
 ├── scripts/
 │   └── activate_env.ps1         ← active le bon venv + charge .env (PowerShell)
-├── powerbi/
-│   └── energiscope.pbix
+├── powerbi/                     ← thème et GeoJSON des communes ; le .pbix reste en local (ignoré par git)
 └── docs/
-    └── architecture.png
+    ├── architecture.md          ← schéma du pipeline, 9 modèles dbt, 3 DAGs, limites connues
+    └── dbt_dag_description.md   ← lineage détaillé, étape par étape
 ```
 
 ## Environnements virtuels
@@ -217,7 +229,7 @@ Webstat est une instance Opendatasoft : les datasets `conj2-*` du catalogue publ
   - Il n'y a pas de nouvelle table Bronze : `stg_rte_mensuel` lit `stg_rte_ecomix` filtré sur `source_dataset`.
 
 ### Marts Gold : écarts à la spec initiale
-- **`mart_correlation_conjoncture`** : la colonne est `conso_regionale_mwh`, pas `conso_industrie_mwh`. RTE ne distingue pas l'industrie ; la consommation industrielle n'existe qu'à la maille annuelle (Enedis). Une série par source (`mart_ipi_idbank`, `mart_bdf_series_key` dans `dbt_project.yml`) ; jointure interne, donc 2018-2024 tant que BdF et INSEE ne sont pas rechargés plus loin.
+- **`mart_correlation_conjoncture`** : la colonne est `conso_regionale_mwh`, pas `conso_industrie_mwh`. RTE ne distingue pas l'industrie ; la consommation industrielle n'existe qu'à la maille annuelle (Enedis). Une série par source (`mart_ipi_idbank`, `mart_bdf_series_key` dans `dbt_project.yml`) ; jointure interne : janvier 2018 à juin 2026 (la limite vient du jeu consolidé de RTE) ; elle s'étendra avec les sources.
 - **`mart_production_regionale`** : `stg_rte_mensuel` a été étendu avec les productions par filière (MWh). Énergies renouvelables = éolien + solaire + hydraulique + bioénergies.
 - **`mart_tension_reseau`** : énergies en MWh sur la durée du créneau (15 min en temps réel, 30 min en consolidé, colonne `pas_minutes`). Le bilan prod − conso est structurellement négatif (la région importe ~2 100 MW en moyenne), donc l'ancien `statut_tension` (TENSION sur 99,8 % des créneaux) a été supprimé au profit de `taux_couverture_locale` (prod / conso × 100) et `variation_couverture_pct` (écart relatif à la moyenne non pondérée des taux du même mois civil local).
 - **`mart_conso_industrielle`** : le grain inclut la catégorie de consommation (ENT/PRO). Les sites PRO n'ont pas de code NAF2.

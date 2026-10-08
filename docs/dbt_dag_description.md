@@ -80,7 +80,7 @@ Chaque modèle suit la même structure : extraction des champs du JSON avec `try
 qualité sur la clé, dédoublonnage par `row_number()`, puis clé de substitution
 (`dbt_utils.generate_surrogate_key`) testée `not_null` et `unique`.
 
-### `stg_rte_ecomix` : 149 020 lignes
+### `stg_rte_ecomix` : 149 092 lignes
 
 Source : `raw_rte_ecomix`. Production et consommation de la région Pays de la Loire.
 
@@ -107,10 +107,10 @@ Source : `stg_rte_ecomix`, restreint au jeu consolidé/définitif.
 - Il porte aussi la production mensuelle par filière (thermique, nucléaire, éolien, solaire,
   hydraulique, bioénergies).
 
-### `stg_enedis_conso` : 15 777 lignes
+### `stg_enedis_conso` : 31 552 lignes
 
-Source : `raw_enedis_conso`. Consommation annuelle par commune et secteur d'activité (année chargée :
-2023).
+Source : `raw_enedis_conso`. Consommation annuelle par commune et secteur d'activité (années chargées :
+2023 et 2024).
 
 - **Grain réel : année × commune × grand secteur × secteur NAF2 × catégorie de consommation.** Une
   première version dédoublonnait sur année × commune × grand secteur seulement : elle ne gardait que
@@ -120,20 +120,20 @@ Source : `raw_enedis_conso`. Consommation annuelle par commune et secteur d'acti
 - **Code commune sur 5 caractères.** `lpad` restaure les zéros de tête perdus.
 - Le code NAF2 est vide pour les petits professionnels et pour le résidentiel : il n'est pas filtré.
 
-### `stg_insee_ipi` : 252 lignes
+### `stg_insee_ipi` : 309 lignes
 
 Source : `raw_insee_ipi`. Indice de production industrielle, trois séries mensuelles corrigées des
-variations saisonnières et des jours ouvrés (base 100 en 2021), sur 84 mois.
+variations saisonnières et des jours ouvrés (base 100 en 2021), sur 103 mois (janvier 2018 à juillet 2026).
 
 - **Aplatissement XML.** L'API de l'INSEE répond en SDMX XML ; le script d'ingestion produit une ligne
   par série et par période, que Silver convertit en date (premier jour du mois).
 - **Dernière ingestion retenue.** Les séries INSEE sont révisées : la valeur la plus récente fait foi.
 - Les séries sont nationales : l'INSEE ne publie pas d'IPI régional dans la BDM.
 
-### `stg_bdf_pmi` : 336 lignes
+### `stg_bdf_pmi` : 416 lignes
 
 Source : `raw_bdf_pmi`. Quatre séries de l'enquête mensuelle de conjoncture de la Banque de France pour
-les Pays de la Loire (industrie manufacturière), sur 84 mois.
+les Pays de la Loire (industrie manufacturière), sur 104 mois (janvier 2018 à août 2026).
 
 - **Pas de vrai PMI.** Le PMI est un indice S&P Global ; la Banque de France n'en publie pas. Les
   soldes d'opinion régionaux servent d'équivalent. Le nom `stg_bdf_pmi` est conservé par continuité.
@@ -143,7 +143,7 @@ les Pays de la Loire (industrie manufacturière), sur 84 mois.
 
 Aucun `select *` dans cette couche : chaque colonne est nommée et documentée.
 
-### `mart_conso_industrielle` : 4 149 lignes
+### `mart_conso_industrielle` : 8 335 lignes
 
 `stg_enedis_conso` filtré sur le grand secteur `INDUSTRIE`, renommé pour la lecture métier
 (`libelle_commune`, `nb_points_de_soutirage`). Destiné à la carte par commune.
@@ -168,7 +168,7 @@ renouvelable ÷ consommation × 100).
 - Le taux moyen est de 19 %, de 6,6 % à 41,9 % selon le mois. Filtrer sur `est_mois_complet` pour
   toute analyse de tendance.
 
-### `mart_correlation_conjoncture` : 84 lignes
+### `mart_correlation_conjoncture` : 102 lignes
 
 Jointure mensuelle de `stg_rte_mensuel`, `stg_insee_ipi` et `stg_bdf_pmi`, avec les variations de chaque
 indicateur d'un mois sur l'autre.
@@ -176,13 +176,13 @@ indicateur d'un mois sur l'autre.
 - **Une série par source**, choisie dans `dbt_project.yml` (`mart_ipi_idbank`, `mart_bdf_series_key`) :
   l'IPI de l'industrie manufacturière et le climat des affaires régional. Changer de série ne demande
   aucune modification SQL.
-- **Jointure interne.** Le mart couvre les mois présents dans les trois sources (2018 à 2024) et
-  s'étendra tout seul quand elles seront rechargées plus loin.
+- **Jointure interne.** Le mart couvre les mois présents dans les trois sources (janvier 2018 à
+  juin 2026, la limite venant du jeu consolidé de RTE) et s'étendra tout seul quand elles iront plus loin.
 - **La consommation est celle de toute la région** (`conso_regionale_mwh`), pas celle de l'industrie :
   RTE ne distingue pas les secteurs, et la consommation industrielle n'existe qu'en annuel (Enedis).
 - La variation n'est calculée que si le mois précédent est bien le mois civil précédent.
 
-### `mart_tension_reseau` : 149 020 lignes
+### `mart_tension_reseau` : 149 092 lignes
 
 `stg_rte_ecomix` à la maille du créneau : production et consommation en MWh sur la durée du créneau
 (15 ou 30 minutes, colonne `pas_minutes`), écart absolu, `taux_couverture_locale` (production ÷
@@ -198,16 +198,17 @@ consommation × 100) et `variation_couverture_pct` (écart relatif à la moyenne
 
 ## Contrôle qualité
 
-95 tests dbt couvrent les couches Bronze (colonnes des sources), Silver et Gold : `not_null` sur les
+101 tests dbt couvrent les couches Bronze (colonnes des sources), Silver et Gold : `not_null` sur les
 colonnes clés, `unique` sur chaque clé de substitution, unicité de la combinaison de colonnes qui
 définit le grain, et `accepted_values` sur les codes connus. Un test sur les catégories Enedis est en
 sévérité `warn` : l'apparition d'une nouvelle catégorie est signalée sans bloquer le pipeline.
 
 ## Limites connues
 
-- **Couverture temporelle inégale.** RTE va jusqu'en juin 2026, INSEE et Banque de France jusqu'en
-  décembre 2024, Enedis ne couvre que 2023. La corrélation porte donc sur 2018-2024.
-- **Corrélation faible.** Entre consommation régionale et IPI, la corrélation mensuelle est de 0,16 ;
+- **Couverture temporelle inégale.** Le jeu consolidé de RTE va jusqu'en juin 2026, l'INSEE jusqu'en
+  juillet 2026, la Banque de France jusqu'en août 2026, et Enedis ne couvre que 2023 et 2024. La
+  corrélation porte donc sur janvier 2018 à juin 2026.
+- **Corrélation faible.** Entre consommation régionale et IPI, la corrélation mensuelle est de 0,13 ;
   la consommation brute est dominée par le chauffage. Répondre à la question décisionnelle demandera
   de corriger de la température.
 - **Doublons en Bronze.** Plusieurs chargements concurrents ont dupliqué des lignes. Aucun effet sur
