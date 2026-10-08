@@ -1,6 +1,48 @@
 version: 2
 
 models:
+  - name: dim_date
+    description: >
+      Dimension calendrier au mois, de janvier 2018 à décembre 2026 (108 lignes), générée sans source
+      avec `dbt_utils.date_spine`. Sert de table de dates commune aux marts mensuels : jointure sur
+      `periode` (YYYY-MM) ou sur le couple `annee` et `mois`.
+      Grain : une ligne par mois.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [annee, mois]
+    columns:
+      - name: annee
+        description: Année civile
+        data_tests: [not_null]
+      - name: mois
+        description: Mois civil (1 à 12)
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+                quote: false
+      - name: periode
+        description: Mois au format YYYY-MM, identique à la colonne `periode` des marts
+        data_tests: [not_null, unique]
+      - name: trimestre
+        description: Trimestre civil (1 à 4)
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4]
+                quote: false
+      - name: semestre
+        description: Semestre civil (1 = janvier à juin, 2 = juillet à décembre)
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2]
+                quote: false
+
   - name: mart_conso_industrielle
     description: >
       Consommation électrique annuelle du secteur industriel par commune des Pays de la Loire
