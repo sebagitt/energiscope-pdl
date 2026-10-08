@@ -183,6 +183,11 @@ models:
       - name: date_heure
         description: Début du créneau, en UTC
         data_tests: [not_null]
+      - name: annee
+        description: >
+          Année de `date_heure`, donc en UTC. Elle diffère de l'année de la colonne `date` (heure légale
+          française) pour les créneaux entre 23h et minuit UTC le 31 décembre, qui sont le 1er janvier à Paris.
+        data_tests: [not_null]
       - name: code_insee_region
         description: Code INSEE de la région
         data_tests: [not_null]

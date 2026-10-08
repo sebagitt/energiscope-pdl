@@ -46,6 +46,7 @@ energie as (
 select
     rte_ecomix_id                                           as tension_id,
     horodatage_utc                                          as date_heure,
+    year(horodatage_utc)                                    as annee,
     code_insee_region,
     libelle_region                                          as region,
     date_locale                                             as date,
