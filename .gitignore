@@ -34,3 +34,7 @@ Thumbs.db
 dbt/state/
 dbt/state_out/
 docs_site/
+
+# Rapport Power BI : binaire lourd, jamais versionne (le fichier reste en local)
+*.pbix
+powerbi/*.pbix
