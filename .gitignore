@@ -38,3 +38,6 @@ docs_site/
 # Rapport Power BI : binaire lourd, jamais versionne (le fichier reste en local)
 *.pbix
 powerbi/*.pbix
+
+# Metadonnees de dossier Windows
+desktop.ini
