@@ -27,7 +27,7 @@ jobs:
   dbt-ci:
     name: Valider les modèles dbt
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: dbt
@@ -80,14 +80,11 @@ jobs:
       - name: dbt compile
         run: dbt compile --target ci --no-populate-cache
 
-      # Échoue en 3 minutes au lieu de bloquer ~15 minutes si Databricks est injoignable
+      # Un warehouse arrêté refuse les premières connexions pendant son démarrage (erreur immédiate, pas un délai
+      # dépassé) : on réessaie jusqu'à 5 fois (12 minutes au plus) au lieu d'échouer au premier refus.
       - name: Tester la connexion Databricks
         if: env.HAS_SECRETS == 'true'
-        run: |
-          timeout 180 dbt debug --target ci --connection || {
-            echo "::error::Connexion à Databricks impossible ou plus de 180 s : vérifier DATABRICKS_HOST, DATABRICKS_HTTP_PATH, DATABRICKS_TOKEN et le démarrage du warehouse."
-            exit 1
-          }
+        run: bash ../.github/scripts/wait_for_databricks.sh ci
 
       # Manifest du dernier run réussi sur main, généré avec la cible « prod » : il sert à la fois de
       # référence pour state:modified et de source des modèles non modifiés (--defer, lecture seule).

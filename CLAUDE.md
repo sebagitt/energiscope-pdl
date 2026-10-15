@@ -262,7 +262,7 @@ GitHub > Settings > Secrets and variables > Actions > New repository secret :
 | `DBT_CATALOG` | Catalogue Unity Catalog (`workspace`) |
 | `DBT_SCHEMA` | Préfixe des schémas de la CI : **`ci`** (voir ci-dessous) |
 
-**Coller la valeur seule, jamais la ligne du `.env`.** `DATABRICKS_HOST=https://dbc-…` collé tel quel donne un hôte `databricks_host=…` : dbt reste bloqué ~15 minutes puis échoue (arrivé au premier run du 2026-10-05). Les workflows vérifient désormais le format (`.github/scripts/check_secrets.sh`) et testent la connexion (`dbt debug --connection`, 180 s max) avant tout `dbt run`.
+**Coller la valeur seule, jamais la ligne du `.env`.** `DATABRICKS_HOST=https://dbc-…` collé tel quel donne un hôte `databricks_host=…` : dbt reste bloqué ~15 minutes puis échoue (arrivé au premier run du 2026-10-05). Les workflows vérifient désormais le format (`.github/scripts/check_secrets.sh`) et testent la connexion (`dbt debug --connection`, jusqu'à 5 essais espacés de 30 s, `.github/scripts/wait_for_databricks.sh`) avant tout `dbt run` : un warehouse arrêté refuse les premières connexions avec `BAD_REQUEST: Cannot create the resource` pendant son démarrage (observé le 2026-10-15).
 
 En ligne de commande, la valeur est lue dans le `.env` local sans être affichée (depuis la racine du projet, Git Bash) :
 

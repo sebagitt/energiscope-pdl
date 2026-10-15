@@ -66,13 +66,10 @@ jobs:
       - name: dbt deps
         run: dbt deps
 
-      # Échoue en 3 minutes au lieu de bloquer ~15 minutes si Databricks est injoignable
+      # Un warehouse arrêté refuse les premières connexions pendant son démarrage (erreur immédiate, pas un délai
+      # dépassé) : on réessaie jusqu'à 5 fois (12 minutes au plus) au lieu d'échouer au premier refus.
       - name: Tester la connexion Databricks
-        run: |
-          timeout 180 dbt debug --target prod --connection || {
-            echo "::error::Connexion à Databricks impossible ou plus de 180 s : vérifier DATABRICKS_HOST, DATABRICKS_HTTP_PATH, DATABRICKS_TOKEN et le démarrage du warehouse."
-            exit 1
-          }
+        run: bash ../.github/scripts/wait_for_databricks.sh prod
 
       # Cible « prod » : le catalogue décrit les vraies tables silver et gold (lecture seule, aucun modèle construit)
       - name: dbt docs generate
